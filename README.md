@@ -55,9 +55,25 @@ msiexec /x SeasonDesktop-0.1.0-x64.msi /qn
 Install [Rust](https://rustup.rs) (stable, MSVC toolchain) and Visual Studio Build Tools with the
 **Desktop development with C++** workload and a Windows SDK (`rc.exe` embeds the app icon).
 
+Build and run in one step:
+
 ```powershell
 cargo run --release
+```
+
+Or build first, then run the executable:
+
+```powershell
 cargo build --release --locked
+.\target\release\season-desktop.exe
+```
+
+Only one instance runs at a time: starting the app again just opens the settings window of the instance that is
+already running. If the installed version is running, quit it first so that your own build starts instead: right-click the tray
+icon → **Thoát Season Desktop**, or run:
+
+```powershell
+& "$env:LOCALAPPDATA\Programs\Season Desktop\season-desktop.exe" --quit-app
 ```
 
 ### Command-line options
