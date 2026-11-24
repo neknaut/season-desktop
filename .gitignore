@@ -1,0 +1,13 @@
+# Build output
+/target
+/dist
+
+# Editors and OS
+.vscode/
+.idea/
+*.swp
+Thumbs.db
+desktop.ini
+
+# Local Claude Code settings
+.claude/settings.local.json

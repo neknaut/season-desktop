@@ -1,0 +1,72 @@
+[package]
+name = "season-desktop"
+version = "0.1.0"
+edition = "2021"
+authors = ["Nek NauT"]
+description = "Seasonal live wallpaper and themed taskbar for Windows 10/11"
+readme = "README.md"
+homepage = "https://github.com/neknaut"
+keywords = ["windows", "wallpaper", "taskbar", "desktop"]
+categories = ["gui"]
+publish = false
+
+[dependencies]
+ab_glyph = "0.2"
+bytemuck = { version = "1", features = ["derive"] }
+egui = "0.31"
+egui-wgpu = "0.31"
+egui-winit = "0.31"
+pollster = "0.4"
+raw-window-handle = "0.6"
+serde = { version = "1", features = ["derive"] }
+tiny-skia = "0.11"
+toml = "0.8"
+tray-icon = "0.19"
+wgpu = "24"
+winit = "0.30"
+
+[dependencies.windows]
+version = "0.58"
+features = [
+    "Foundation",
+    "Media_Control",
+    "Win32_Foundation",
+    "Win32_Globalization",
+    "Win32_Graphics_Dwm",
+    "Win32_Graphics_Gdi",
+    "Win32_Media",
+    "Win32_Media_Audio",
+    "Win32_Media_Audio_Endpoints",
+    "Win32_NetworkManagement_IpHelper",
+    "Win32_NetworkManagement_Ndis",
+    "Win32_Networking_WinSock",
+    "Win32_Security",
+    "Win32_Storage_FileSystem",
+    "Win32_Storage_Packaging_Appx",
+    "Win32_System_Com",
+    "Win32_System_Com_StructuredStorage",
+    "Win32_System_DataExchange",
+    "Win32_System_Diagnostics_ToolHelp",
+    "Win32_System_Environment",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Power",
+    "Win32_System_Registry",
+    "Win32_System_SystemInformation",
+    "Win32_System_Threading",
+    "Win32_System_Variant",
+    "Win32_System_WinRT",
+    "Win32_UI_Accessibility",
+    "Win32_UI_Controls",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_Shell",
+    "Win32_UI_Shell_Common",
+    "Win32_UI_Shell_PropertiesSystem",
+    "Win32_UI_WindowsAndMessaging",
+]
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

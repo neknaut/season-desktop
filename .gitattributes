@@ -1,0 +1,11 @@
+# Normalize text files; keep Windows line endings where Windows tools expect them.
+* text=auto eol=lf
+*.ps1 text eol=crlf
+*.wxs text eol=crlf
+*.rtf text eol=crlf
+
+# Binary assets
+*.png binary
+*.ico binary
+*.ttf binary
+*.msi binary

@@ -1,0 +1,127 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Season Desktop - bộ cài MSI (WiX Toolset 3.14, giống repo meeting).
+  Build: scripts\build-installer.ps1 (tự tìm candle.exe / light.exe).
+
+  - Cài cho riêng người dùng hiện tại (không cần quyền admin) vào %LOCALAPPDATA%\Programs\Season Desktop.
+  - Shortcut ở Start (và tuỳ chọn trên desktop), icon riêng trong "Apps & features".
+  - Cài bản mới sẽ thay bản cũ (MajorUpgrade).
+  - Gỡ cài đặt: tắt app, trả lại taskbar + hình nền gốc, bỏ khởi động cùng Windows (chạy season-desktop.exe với tham số restore).
+-->
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <?ifndef AppVersion ?>
+    <?define AppVersion = "0.1.0" ?>
+  <?endif ?>
+  <?ifndef SourceDir ?>
+    <?define SourceDir = ".." ?>
+  <?endif ?>
+
+  <Product Id="*"
+           Name="Season Desktop"
+           Language="1033"
+           Version="$(var.AppVersion)"
+           Manufacturer="Nek NauT"
+           UpgradeCode="6F2C9C1E-5E2B-4C55-9D8E-5EA50ADE5C01">
+
+    <Package InstallerVersion="500"
+             Compressed="yes"
+             InstallScope="perUser"
+             InstallPrivileges="limited"
+             Platform="x64"
+             Description="Season Desktop - hinh nen dong va taskbar theo mua"
+             Manufacturer="Nek NauT" />
+
+    <MajorUpgrade Schedule="afterInstallInitialize"
+                  DowngradeErrorMessage="Da co ban Season Desktop moi hon tren may." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <Icon Id="AppIcon" SourceFile="$(var.SourceDir)\assets\icon.ico" />
+    <Property Id="ARPPRODUCTICON" Value="AppIcon" />
+    <Property Id="ARPNOREPAIR" Value="yes" Secure="yes" />
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/neknaut" />
+    <!-- Cài cho riêng người dùng -->
+    <Property Id="ALLUSERS" Value="2" />
+    <Property Id="MSIINSTALLPERUSER" Value="1" />
+
+    <!-- Thư mục cài: %LOCALAPPDATA%\Programs\Season Desktop -->
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="LocalAppDataFolder">
+        <Directory Id="ProgramsFolder" Name="Programs">
+          <Directory Id="INSTALLDIR" Name="Season Desktop">
+            <Directory Id="LicensesDir" Name="licenses" />
+          </Directory>
+        </Directory>
+      </Directory>
+      <Directory Id="ProgramMenuFolder" />
+      <Directory Id="DesktopFolder" />
+    </Directory>
+
+    <DirectoryRef Id="INSTALLDIR">
+      <Component Id="AppExe" Guid="3C8F2A61-6B0D-4E8A-9A2B-1F4D5C6E7A01" Win64="yes">
+        <File Id="AppExeFile" Source="$(var.SourceDir)\target\release\season-desktop.exe" Name="season-desktop.exe" />
+        <RegistryValue Root="HKCU" Key="Software\Nek NauT\Season Desktop" Name="InstallDir" Type="string" Value="[INSTALLDIR]" KeyPath="yes" />
+        <RemoveFolder Id="RemoveInstallDir" Directory="INSTALLDIR" On="uninstall" />
+        <RemoveFolder Id="RemoveProgramsFolder" Directory="ProgramsFolder" On="uninstall" />
+      </Component>
+      <Component Id="Readme" Guid="3C8F2A61-6B0D-4E8A-9A2B-1F4D5C6E7A02" Win64="yes">
+        <File Id="ReadmeFile" Source="$(var.SourceDir)\README.md" Name="README.md" />
+        <RegistryValue Root="HKCU" Key="Software\Nek NauT\Season Desktop" Name="Readme" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+
+    <DirectoryRef Id="LicensesDir">
+      <Component Id="Licenses" Guid="3C8F2A61-6B0D-4E8A-9A2B-1F4D5C6E7A03" Win64="yes">
+        <File Id="OflBeVietnam" Source="$(var.SourceDir)\assets\fonts\OFL-BeVietnamPro.txt" Name="OFL-BeVietnamPro.txt" />
+        <File Id="OflDancing" Source="$(var.SourceDir)\assets\fonts\OFL-DancingScript.txt" Name="OFL-DancingScript.txt" />
+        <RegistryValue Root="HKCU" Key="Software\Nek NauT\Season Desktop" Name="Licenses" Type="integer" Value="1" KeyPath="yes" />
+        <RemoveFolder Id="RemoveLicensesDir" Directory="LicensesDir" On="uninstall" />
+      </Component>
+    </DirectoryRef>
+
+    <DirectoryRef Id="ProgramMenuFolder">
+      <Component Id="StartMenuShortcut" Guid="*">
+        <Shortcut Id="StartShortcut" Name="Season Desktop" Description="Hinh nen dong va taskbar theo mua"
+                  Target="[INSTALLDIR]season-desktop.exe" WorkingDirectory="INSTALLDIR" />
+        <RegistryValue Root="HKCU" Key="Software\Nek NauT\Season Desktop" Name="StartShortcut" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+
+    <DirectoryRef Id="DesktopFolder">
+      <Component Id="DesktopShortcut" Guid="*">
+        <Shortcut Id="DeskShortcut" Name="Season Desktop" Description="Hinh nen dong va taskbar theo mua"
+                  Target="[INSTALLDIR]season-desktop.exe" WorkingDirectory="INSTALLDIR" />
+        <RegistryValue Root="HKCU" Key="Software\Nek NauT\Season Desktop" Name="DesktopShortcut" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+
+    <Feature Id="Main" Title="Season Desktop" Level="1" Absent="disallow">
+      <ComponentRef Id="AppExe" />
+      <ComponentRef Id="Readme" />
+      <ComponentRef Id="Licenses" />
+      <ComponentRef Id="StartMenuShortcut" />
+      <ComponentRef Id="DesktopShortcut" />
+    </Feature>
+
+    <!-- Gỡ cài đặt: tắt app + trả lại taskbar, hình nền gốc, bỏ khởi động cùng Windows.
+         Chạy trước khi Windows kiểm tra file đang dùng, khi gỡ hẳn (không phải lúc nâng cấp). -->
+    <!-- 1) Tắt app trước khi Windows kiểm tra file đang dùng (cả khi gỡ lẫn khi nâng cấp).
+            Tiến trình canh của app chạy bằng tài khoản người dùng sẽ tự trả taskbar gốc. -->
+    <CustomAction Id="QuitApp" FileKey="AppExeFile" ExeCommand="--quit-app" Execute="immediate" Return="ignore" />
+    <!-- 2) Khi gỡ hẳn: trả lại hình nền gốc, bỏ khởi động cùng Windows và trả taskbar nếu còn sót.
+            Chạy ngay (immediate) trong phiên của người dùng, trước khi xoá file. -->
+    <CustomAction Id="RestoreUser" FileKey="AppExeFile" ExeCommand="--uninstall-app" Execute="immediate" Return="ignore" />
+    <!-- Mở app sau khi cài xong -->
+    <CustomAction Id="LaunchApp" FileKey="AppExeFile" ExeCommand="" Execute="immediate" Impersonate="yes" Return="asyncNoWait" />
+
+    <InstallExecuteSequence>
+      <Custom Action="RestoreUser" Before="QuitApp">REMOVE="ALL" AND NOT UPGRADINGPRODUCTCODE</Custom>
+      <Custom Action="QuitApp" Before="InstallValidate">REMOVE="ALL"</Custom>
+      <Custom Action="LaunchApp" After="InstallFinalize">NOT Installed AND NOT REMOVE AND UILevel &gt;= 5</Custom>
+    </InstallExecuteSequence>
+
+    <UI>
+      <UIRef Id="WixUI_Minimal" />
+    </UI>
+    <WixVariable Id="WixUILicenseRtf" Value="$(var.SourceDir)\installer\license.rtf" />
+  </Product>
+</Wix>
