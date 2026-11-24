@@ -50,7 +50,27 @@ msiexec /i SeasonDesktop-0.1.0-x64.msi /qn
 msiexec /x SeasonDesktop-0.1.0-x64.msi /qn
 ```
 
+## Run from source (testing)
+
+To try changes without installing, build and run the app directly (requires Rust and Visual Studio Build Tools,
+see [Build the installer](#build-the-installer)):
+
+```powershell
+cargo run --release
+```
+
+`cargo run` builds `target\release\season-desktop.exe` and starts it. Only one instance runs at a time: starting
+the app again just opens the settings window of the instance that is already running. If the installed version
+is running, quit it first so that your test build starts instead: right-click the tray icon →
+**Thoát Season Desktop**, or run:
+
+```powershell
+& "$env:LOCALAPPDATA\Programs\Season Desktop\season-desktop.exe" --quit-app
+```
+
 ## Build the installer
+
+Releases are shipped as an MSI installer only.
 
 Requirements:
 
