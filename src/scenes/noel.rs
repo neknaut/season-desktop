@@ -20,19 +20,12 @@ struct Light {
     y: f32,
     c: [f32; 3],
     p: f32,
-    s: f32,
 }
 struct Flake {
     x: f32,
     y: f32,
     z: usize,
     p: f32,
-}
-struct Smoke {
-    x: f32,
-    y: f32,
-    a: f32,
-    r: f32,
 }
 
 pub struct Noel {
@@ -42,8 +35,6 @@ pub struct Noel {
     stars: Vec<Star>,
     lights: Vec<Light>,
     snow: Vec<Flake>,
-    smoke: Vec<Smoke>,
-    sm_t: f32,
     win: (f32, f32),
     chim: (f32, f32),
     star: (f32, f32),
@@ -178,8 +169,8 @@ impl Noel {
             let y = tb - th + t * th * 0.96;
             let half = th * 0.42 * (0.18 + 0.9 * t) * 0.78;
             let x = tx + (r.f() * 2.0 - 1.0) * half;
-            let (p, s) = (r.f() * TAU, 1.5 + r.f() * 3.0);
-            lights.push(Light { x, y, c: cols[i % 4], p, s });
+            let (p, _speed) = (r.f() * TAU, r.f());
+            lights.push(Light { x, y, c: cols[i % 4], p });
         }
 
         // 480 bông tuyết (240 đầu giống hệt bản xem thử); số bông hiện ra tuỳ cài đặt.
@@ -197,8 +188,6 @@ impl Noel {
             stars,
             lights,
             snow,
-            smoke: Vec::new(),
-            sm_t: 0.0,
             win: (hx - 29.0, gy - 41.0),
             chim: (hx + 37.0, gy - 142.0),
             star: (tx, tb - th + 2.0),
@@ -267,7 +256,6 @@ impl Scene for Noel {
         // Khói ống khói
         if !self.painted {
             // chỉ giữ tuyết rơi và xe tuần lộc: khói, đèn, sao đều đứng yên
-            let _ = (&mut self.sm_t, &mut self.smoke);
             let sg = rgb8(205, 215, 230);
             for k in 0..5 {
                 let a = k as f32 * 0.8;

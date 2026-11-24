@@ -73,7 +73,6 @@ enum Hit {
     Start,
     App(isize),
     Media,
-    Settings,
     Peek,
     /// Mạng, pin: mở cài đặt nhanh của Windows
     Net,
@@ -376,7 +375,6 @@ fn arc(pb: &mut PathBuilder, cx: f32, cy: f32, r: f32, a0: f32, a1: f32, first: 
 enum Icon {
     Snowflake,
     Chevron,
-    ChevronDown,
     Wifi,
     Ethernet,
     /// (mức 0..1, tắt tiếng)
@@ -406,13 +404,6 @@ fn icon(cv: &mut Canvas, which: Icon, x: f32, y: f32, s: f32, col: Color) {
             pb.move_to(7.0, 14.5);
             pb.line_to(12.0, 9.5);
             pb.line_to(17.0, 14.5);
-            paths.extend(pb.finish());
-        }
-        Icon::ChevronDown => {
-            let mut pb = PathBuilder::new();
-            pb.move_to(7.0, 9.5);
-            pb.line_to(12.0, 14.5);
-            pb.line_to(17.0, 9.5);
             paths.extend(pb.finish());
         }
         Icon::Wifi => {
@@ -1254,7 +1245,6 @@ impl Bar {
                         _ => shell::activate(h),
                     },
                     Hit::Media => self.media.toggle(),
-                    Hit::Settings => return Some(BarAction::OpenSettings),
                     // Bảng icon ẩn của chính taskbar này (theo chủ đề)
                     Hit::Peek => {
                         if !self.just_closed(1) {

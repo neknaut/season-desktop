@@ -1683,8 +1683,6 @@ pub struct Pin {
     pub icon: Option<Vec<u8>>,
     /// AppUserModelID (Windows dùng để gộp cửa sổ vào đúng ô ghim)
     pub aumid: String,
-    /// Vị trí của mục trong Taskband\Favorites (để ghi lại thứ tự khi kéo đổi chỗ)
-    pub fav: Option<usize>,
 }
 
 /// Thời điểm tiến trình của cửa sổ được mở (đơn vị 100 ns, FILETIME). Dùng để xếp các app đang
@@ -1734,7 +1732,6 @@ pub fn package_aumid(hwnd: isize) -> Option<String> {
 /// ID app (AUMID) ghi trong lối tắt Start Menu trỏ tới chương trình `exe` (đường dẫn chữ thường):
 /// cách Windows gán ID cho app không tự gắn (ví dụ VS Code). Đọc một lần ở luồng nền.
 pub fn start_menu_aumid(exe: &str) -> Option<String> {
-    use std::collections::HashMap;
     start_menu().and_then(|m| m.get(exe).map(|(a, _)| a.clone())).filter(|a| !a.is_empty())
 }
 
@@ -1863,7 +1860,7 @@ fn pin_from_lnk(lnk: &str, size: i32) -> Pin {
         .and_then(|(p, i)| icon_at(&p, i, size))
         .or_else(|| if !target.is_empty() && std::path::Path::new(&target).exists() { file_icon(&target, size) } else { None })
         .or_else(|| file_icon(lnk, size));
-    Pin { lnk: lnk.to_string(), target: target.to_lowercase(), name, icon, aumid, fav: None }
+    Pin { lnk: lnk.to_string(), target: target.to_lowercase(), name, icon, aumid }
 }
 
 /// Icon ghi riêng trong lối tắt: (file, chỉ số).
@@ -2080,7 +2077,6 @@ fn favorites(size: i32) -> Option<Vec<Pin>> {
     let fav = reg_get(r"Software\Microsoft\Windows\CurrentVersion\Explorer\Taskband", "Favorites")?;
     let mut out = Vec::new();
     let mut p = 1usize;
-    let mut index = 0usize;
     unsafe {
         let _ = windows::Win32::System::Com::CoInitializeEx(None, windows::Win32::System::Com::COINIT_APARTMENTTHREADED);
         while p + 4 <= fav.len() {
@@ -2091,8 +2087,6 @@ fn favorites(size: i32) -> Option<Vec<Pin>> {
             let mut idl = fav[p + 4..p + 4 + n].to_vec();
             idl.extend_from_slice(&[0, 0, 0, 0]);
             p += 4 + n + 1;
-            let fav = Some(index);
-            index += 1;
             let Ok(item) = SHCreateItemFromIDList::<IShellItem>(idl.as_ptr() as *const windows::Win32::UI::Shell::Common::ITEMIDLIST) else { continue };
             let get = |k: SIGDN| item.GetDisplayName(k).ok().map(|s| {
                 let r = s.to_string().unwrap_or_default();
@@ -2100,11 +2094,11 @@ fn favorites(size: i32) -> Option<Vec<Pin>> {
                 r
             });
             if let Some(path) = get(SIGDN_FILESYSPATH).filter(|p| p.to_lowercase().ends_with(".lnk") && std::path::Path::new(p).exists()) {
-                out.push(Pin { fav, ..pin_from_lnk(&path, size) });
+                out.push(pin_from_lnk(&path, size));
             } else if let Some(aumid) = get(SIGDN_PARENTRELATIVEPARSING).filter(|a| a.contains('!') || !a.contains('\\')) {
                 let name = get(SIGDN_NORMALDISPLAY).unwrap_or_else(|| aumid.clone());
                 let icon = store_logo(&item, size).or_else(|| logo_in_idlist(&idl, size)).or_else(|| aumid_icon(&aumid, size)).or_else(|| item_icon(&item, size));
-                out.push(Pin { lnk: format!(r"shell:AppsFolder\{aumid}"), target: String::new(), name, icon, aumid, fav });
+                out.push(Pin { lnk: format!(r"shell:AppsFolder\{aumid}"), target: String::new(), name, icon, aumid });
             }
         }
     }

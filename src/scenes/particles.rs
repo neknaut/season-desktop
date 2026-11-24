@@ -3,7 +3,6 @@ use tiny_skia::PathBuilder;
 
 #[derive(Clone, Copy)]
 pub(super) enum Shape {
-    Petal,
     Apricot,
     Leaf,
 }
@@ -20,13 +19,6 @@ pub(super) fn stamp(atlas: &mut Atlas, size: f32, base: u32, shape: Shape) -> [f
 fn paint(cv: &mut Canvas, base: u32, shape: Shape) {
     let mut path = PathBuilder::new();
     match shape {
-        Shape::Petal => {
-            path.move_to(-7.5, 2.2);
-            path.cubic_to(-4.4, -3.7, 1.6, -7.1, 6.2, -6.4);
-            path.quad_to(8.5, -6.0, 7.0, -2.6);
-            path.quad_to(10.5, -2.3, 7.4, 0.6);
-            path.cubic_to(3.2, 4.5, -4.2, 5.3, -7.5, 2.2);
-        }
         Shape::Apricot => {
             path.move_to(-8.3, 3.0);
             path.quad_to(-6.2, -1.6, -3.2, -4.7);
@@ -69,7 +61,7 @@ fn paint(cv: &mut Canvas, base: u32, shape: Shape) {
             cv.line(-0.7, 3.6, -5.1, 0.2, stem.clone(), 0.65);
             cv.line(-0.5, 2.0, 4.9, 0.5, stem, 0.65);
         }
-        Shape::Petal | Shape::Apricot => {
+        Shape::Apricot => {
             cv.line(-4.7, 1.8, 1.2, -2.0, solid(ca(255, 232, 194, 0.42)), 0.68);
         }
     }

@@ -30,15 +30,10 @@ enum Motif {
 #[derive(Clone, Copy, PartialEq)]
 enum Fx {
     Breeze,
-    Petals,
     Sparkles,
     Leaves,
     Snow,
     Fireworks,
-    Hearts,
-    Confetti,
-    Balloons,
-    Bats,
     Fireflies,
 }
 
@@ -291,9 +286,9 @@ enum Extra {
     /// diều bay theo gió, dây nối về tay người thả
     Kite { uv: [f32; 4], x: f32, y: f32, hand: (f32, f32), s: f32, ph: f32 },
     /// thuyền buồm trôi trên biển
-    Boat { uv: [f32; 4], x: f32, y: f32, s: f32, v: f32 },
+    Boat { uv: [f32; 4], x: f32, y: f32, s: f32 },
     /// chim bay (hải âu, bồ câu): vỗ cánh
-    Bird { x: f32, y: f32, v: f32, ph: f32, s: f32, white: bool },
+    Bird { x: f32, y: f32, ph: f32, s: f32, white: bool },
     /// khói ống khói
     Smoke { x: f32, y: f32 },
     /// que pháo sáng trên tay
@@ -361,7 +356,6 @@ pub struct Festive {
     fw_t: f32,
     /// ảnh trong atlas: cánh hoa / lá / tim / bóng bay (theo 4 màu), dơi
     sprites: Vec<[f32; 4]>,
-    bat: [f32; 4],
     /// chỗ để lấp lánh (mặt biển, cửa sổ...)
     glints: Vec<(f32, f32, f32)>,
     /// mây trôi (ban ngày): x, y, rộng, cao, tốc độ
@@ -867,10 +861,11 @@ impl Festive {
             }
             Kind::Summer => {
                 let uv = atlas.add(70.0, 80.0, 35.0, 76.0, |cv| sailboat(cv, 70.0));
-                extras.push(Extra::Boat { uv, x: at(0.55), y: lh * 0.76, s: 1.0, v: 8.0 });
-                extras.push(Extra::Boat { uv, x: at(0.85), y: lh * 0.735, s: 0.6, v: 5.0 });
+                extras.push(Extra::Boat { uv, x: at(0.55), y: lh * 0.76, s: 1.0 });
+                extras.push(Extra::Boat { uv, x: at(0.85), y: lh * 0.735, s: 0.6 });
                 for i in 0..5 {
-                    extras.push(Extra::Bird { x: r.f() * lw, y: lh * (0.18 + r.f() * 0.25), v: 22.0 + r.f() * 14.0, ph: i as f32, s: 0.8 + r.f() * 0.5, white: true });
+                    let (x, y, _speed) = (r.f() * lw, lh * (0.18 + r.f() * 0.25), r.f());
+                    extras.push(Extra::Bird { x, y, ph: i as f32, s: 0.8 + r.f() * 0.5, white: true });
                 }
                 // ô che nắng + người nằm phơi nắng trên bãi cát
                 let ux = at(if pt { 0.62 } else { 0.70 });
@@ -982,7 +977,8 @@ impl Festive {
                     }
                 }
                 for i in 0..4 {
-                    extras.push(Extra::Bird { x: r.f() * lw, y: lh * (0.12 + r.f() * 0.2), v: 26.0 + r.f() * 10.0, ph: i as f32 * 1.3, s: 1.0, white: true });
+                    let (x, y, _speed) = (r.f() * lw, lh * (0.12 + r.f() * 0.2), r.f());
+                    extras.push(Extra::Bird { x, y, ph: i as f32 * 1.3, s: 1.0, white: true });
                 }
             }
             Kind::Halloween if people => {
@@ -1154,46 +1150,18 @@ impl Festive {
             let uv = match fx_main.unwrap_or(Fx::Sparkles) {
                 Fx::Breeze => breeze.expect("spring wind stamp"),
                 Fx::Leaves => super::particles::stamp(atlas, SP, cc, super::particles::Shape::Leaf),
-                Fx::Petals => super::particles::stamp(atlas, SP, cc, super::particles::Shape::Petal),
-                Fx::Hearts => atlas.add(SP, SP, SP / 2.0, SP / 2.0, |cv| {
-                    if let Some(p) = heart_path(0.0, 0.0, SP * 0.42) {
-                        cv.fill(&p, solid(c(cc)));
-                    }
-                }),
-                Fx::Balloons => atlas.add(SP * 1.4, SP * 3.0, SP * 0.7, SP * 0.75, |cv| {
-                    cv.line(0.0, SP * 0.7, (SP * 0.1).sin() * 3.0, SP * 2.2, solid(col(0x666666, 0.8)), 1.0);
-                    cv.ellipse(0.0, 0.0, SP * 0.55, SP * 0.7, 0.0, rad(-SP * 0.2, -SP * 0.25, 0.0, 0.0, SP * 0.7, &[(0.0, col(0xffffff, 1.0)), (0.25, c(cc)), (1.0, c(cc))]));
-                }),
                 _ => atlas.add(SP, SP, SP / 2.0, SP / 2.0, |cv| {
                     cv.ellipse(0.0, 0.0, SP * 0.42, SP * 0.26, 0.3, rad(-SP * 0.1, -SP * 0.05, 0.0, 0.0, SP * 0.42, &[(0.0, col(0xffffff, 0.95)), (0.5, c(cc)), (1.0, c(cc))]));
                 }),
             };
             sprites.push(uv);
         }
-        let bat = atlas.add(SP * 2.0, SP, SP, SP / 2.0, |cv| {
-            let mut pb = PathBuilder::new();
-            pb.move_to(0.0, -SP * 0.1);
-            pb.quad_to(-SP * 0.4, -SP * 0.45, -SP * 0.95, -SP * 0.2);
-            pb.quad_to(-SP * 0.6, -SP * 0.05, -SP * 0.55, SP * 0.2);
-            pb.quad_to(-SP * 0.3, SP * 0.0, 0.0, SP * 0.25);
-            pb.quad_to(SP * 0.3, SP * 0.0, SP * 0.55, SP * 0.2);
-            pb.quad_to(SP * 0.6, -SP * 0.05, SP * 0.95, -SP * 0.2);
-            pb.quad_to(SP * 0.4, -SP * 0.45, 0.0, -SP * 0.1);
-            if let Some(p) = pb.finish() {
-                cv.fill(&p, solid(c(0x120818)));
-            }
-        });
-
         // ---- hạt chuyển động
         let mut parts = Vec::new();
         let n = match fx_main.unwrap_or(Fx::Sparkles) {
             Fx::Breeze => 8,
             Fx::Snow => 320,
-            Fx::Petals | Fx::Leaves => 46,
-            Fx::Hearts => 28,
-            Fx::Balloons => 16,
-            Fx::Confetti => 90,
-            Fx::Bats => 9,
+            Fx::Leaves => 46,
             _ => 0,
         };
         for _ in 0..n {
@@ -1237,7 +1205,7 @@ impl Festive {
                 parts.clear();
             }
         }
-        Festive { painted, w: lw, h: lh, st, parts, sparks: Vec::new(), fw_t: 0.5, sprites, bat, glints, clouds, sun, bokeh, extras, rnd: Fast::seeded() }
+        Festive { painted, w: lw, h: lh, st, parts, sparks: Vec::new(), fw_t: 0.5, sprites, glints, clouds, sun, bokeh, extras, rnd: Fast::seeded() }
     }
 }
 
@@ -1303,7 +1271,7 @@ impl Scene for Festive {
         let on = |f: Fx| match f {
             Fx::Snow => cfg.snow > 0.01,
             Fx::Fireworks => cfg.fireworks,
-            Fx::Breeze | Fx::Petals | Fx::Leaves | Fx::Hearts | Fx::Balloons | Fx::Confetti => cfg.petals,
+            Fx::Breeze | Fx::Leaves => cfg.petals,
             _ => true,
         };
         let fx0 = self.st.fx.first().copied().unwrap_or(Fx::Sparkles);
@@ -1322,19 +1290,11 @@ impl Scene for Festive {
                         p.y += (12.0 + 38.0 * depth) * dt;
                         p.x += (wind * (0.45 + depth) + (t * 0.6 + p.ph).sin() * 8.0) * dt;
                     }
-                    Fx::Petals | Fx::Leaves | Fx::Confetti => {
+                    Fx::Leaves => {
                         let flutter = (t * 1.2 + p.ph).sin();
                         p.y += (24.0 + 26.0 * p.s + flutter * 7.0) * dt;
                         p.x += (wind + flutter * 20.0) * dt;
                         p.rot += (p.vr + flutter * 0.52) * dt;
-                    }
-                    Fx::Hearts | Fx::Balloons => {
-                        p.y -= (16.0 + 22.0 * p.s) * dt;
-                        p.x += (t * 0.7 + p.ph).sin() * 10.0 * dt;
-                    }
-                    Fx::Bats => {
-                        p.x += (40.0 + 40.0 * p.s) * dt;
-                        p.y += (t * 1.3 + p.ph).sin() * 16.0 * dt;
                     }
                     _ => {}
                 }
@@ -1371,20 +1331,7 @@ impl Scene for Festive {
                         let r = 0.95 + 3.0 * depth;
                         dl.disc(Blend::Alpha, p.x, p.y, r, r, 0.0, [0.92, 0.96, 1.0], 0.32 + 0.52 * depth);
                     }
-                    Fx::Confetti => {
-                        let cc = frgb(self.st.cols[p.k]);
-                        dl.rect(Blend::Alpha, p.x, p.y, 6.0 * p.s + 3.0, 3.5, p.rot, cc, 0.95);
-                    }
-                    Fx::Bats => {
-                        let flap = 0.55 + 0.45 * (t * 9.0 + p.ph).sin().abs();
-                        let s = 1.0 + p.s;
-                        dl.atlas(self.bat, p.x, p.y, SP * 2.0 * s, SP * s * flap, 0.0, 0.95);
-                    }
-                    Fx::Balloons => {
-                        let s = 1.4 + p.s;
-                        dl.atlas(self.sprites[p.k], p.x, p.y, SP * 1.4 * s, SP * 3.0 * s, (t * 0.8 + p.ph).sin() * 0.08, 1.0);
-                    }
-                    Fx::Petals | Fx::Leaves => {
+                    Fx::Leaves => {
                         let flutter = (t * (1.1 + p.s * 0.42) + p.ph).sin();
                         let size = SP * (0.36 + 0.67 * p.s);
                         let edge = (p.y / 28.0).min((h - p.y) / 40.0).clamp(0.0, 1.0);
@@ -1413,10 +1360,10 @@ impl Scene for Festive {
                     }
                     dl.atlas(*uv, kx, ky, 40.0 * *s, 90.0 * *s, (t * 1.1 + *ph).sin() * 0.25, 1.0);
                 }
-                Extra::Boat { uv, x, y, s, v: _ } => {
+                Extra::Boat { uv, x, y, s } => {
                     dl.atlas(*uv, *x, *y - 40.0 * *s, 70.0 * *s, 80.0 * *s, 0.0, 1.0);
                 }
-                Extra::Bird { x, y, v: _, ph, s, white } => {
+                Extra::Bird { x, y, ph, s, white } => {
                     let flap = (*ph).sin() * 0.5;
                     let col = if *white { rgb8(255, 255, 255) } else { rgb8(30, 30, 40) };
                     let (bx, by) = (*x, *y);

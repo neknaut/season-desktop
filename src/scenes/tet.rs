@@ -19,8 +19,6 @@ struct Bokeh {
     x: f32,
     y: f32,
     s: f32,
-    v: f32,
-    p: f32,
     a: f32,
 }
 struct Petal {
@@ -344,8 +342,9 @@ impl Tet {
 
         let mut bokeh = Vec::new();
         for _ in 0..22 {
-            let (x, y, s, v, p, a) = (r.f() * lw, r.f() * lh, 14.0 + r.f() * 40.0, 4.0 + r.f() * 8.0, r.f() * TAU, 0.08 + r.f() * 0.16);
-            bokeh.push(Bokeh { x, y, s, v, p, a });
+            // (giữ đủ các lần lấy số ngẫu nhiên để những thứ dựng sau vẫn ở đúng chỗ)
+            let (x, y, s, _speed, _phase, a) = (r.f() * lw, r.f() * lh, 14.0 + r.f() * 40.0, r.f(), r.f(), 0.08 + r.f() * 0.16);
+            bokeh.push(Bokeh { x, y, s, a });
         }
         let petal_uv = [0xf4be57, 0xffd889].map(|color| {
             super::particles::stamp(atlas, 22.0, color, super::particles::Shape::Apricot)
