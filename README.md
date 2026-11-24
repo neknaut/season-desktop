@@ -50,33 +50,32 @@ msiexec /i SeasonDesktop-0.1.0-x64.msi /qn
 msiexec /x SeasonDesktop-0.1.0-x64.msi /qn
 ```
 
-## Build from source
+## Build the installer
 
-Install [Rust](https://rustup.rs) (stable, MSVC toolchain) and Visual Studio Build Tools with the
-**Desktop development with C++** workload and a Windows SDK (`rc.exe` embeds the app icon).
+Requirements:
 
-Build and run in one step:
+- [Rust](https://rustup.rs) (stable, MSVC toolchain);
+- Visual Studio Build Tools with the **Desktop development with C++** workload and a Windows SDK
+  (`rc.exe` embeds the app icon);
+- **WiX Toolset 3.14** (`candle.exe` and `light.exe`). The script looks in `%WIX%\bin`, `PATH`,
+  `%LOCALAPPDATA%\tauri\WixTools314` and the default WiX 3.14 install folder.
 
-```powershell
-cargo run --release
-```
-
-Or build first, then run the executable:
-
-```powershell
-cargo build --release --locked
-.\target\release\season-desktop.exe
-```
-
-Only one instance runs at a time: starting the app again just opens the settings window of the instance that is
-already running. If the installed version is running, quit it first so that your own build starts instead: right-click the tray
-icon → **Thoát Season Desktop**, or run:
+From the project folder, run:
 
 ```powershell
-& "$env:LOCALAPPDATA\Programs\Season Desktop\season-desktop.exe" --quit-app
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-installer.ps1
 ```
+
+The script compiles the app in release mode and packages it into `dist\SeasonDesktop-<version>-x64.msi`.
+Install that file as described in [Install](#install).
+
+To release a new version, bump `version` in `Cargo.toml`, add an entry to `CHANGELOG.md` and run the script
+again. MSI versions must be numeric (major and minor ≤ 255, patch ≤ 65535). The installer is not code-signed,
+so SmartScreen may warn.
 
 ### Command-line options
+
+The installed `season-desktop.exe` accepts:
 
 | Option | Description |
 | --- | --- |
@@ -86,19 +85,6 @@ icon → **Thoát Season Desktop**, or run:
 | `--snapshot <dir>` | Render all 16 themes (landscape and portrait) to PNG files without touching the desktop |
 | `--export-icon <file.ico>` | Export the app icon |
 | `--quit-app`, `--uninstall-app` | Used by the installer to close the app / clean up before uninstalling |
-
-### Build the MSI installer
-
-Install **WiX Toolset 3.14** (`candle.exe` and `light.exe`). The script looks in `%WIX%\bin`, `PATH`,
-`%LOCALAPPDATA%\tauri\WixTools314` and the default WiX 3.14 install folder.
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-installer.ps1
-```
-
-The installer is written to `dist\SeasonDesktop-<version>-x64.msi`. To release a new version, bump `version` in
-`Cargo.toml`, add an entry to `CHANGELOG.md` and run the script again. MSI versions must be numeric
-(major and minor ≤ 255, patch ≤ 65535). The installer is not code-signed, so SmartScreen may warn.
 
 ## Project structure
 
