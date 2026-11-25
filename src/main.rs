@@ -145,6 +145,44 @@ struct Wall {
     covered: bool,
 }
 
+struct SettingsHardware {
+    sampled: Instant,
+    monitors: Vec<desktop::Monitor>,
+    has_battery: bool,
+}
+
+impl SettingsHardware {
+    fn read() -> Self {
+        Self {
+            sampled: Instant::now(),
+            monitors: desktop::monitors(),
+            has_battery: bar::shell::battery_percent().is_some(),
+        }
+    }
+}
+
+struct PreparedScene {
+    kind: Kind,
+    size: (u32, u32),
+    built: scenes::Built,
+    backdrop: Option<tiny_skia::Pixmap>,
+}
+
+impl PreparedScene {
+    fn build(kind: Kind, size: (u32, u32)) -> Self {
+        let built = scenes::build(kind, size.0, size.1);
+        let backdrop = bar::make_backdrop(&built.back.pm, &built.front.pm, size);
+        Self { kind, size, built, backdrop }
+    }
+}
+
+struct ThemeJob {
+    monitor: String,
+    theme: String,
+    cancelled: bool,
+    worker: std::thread::JoinHandle<PreparedScene>,
+}
+
 struct App {
     /// Cấu hình đang áp dụng cho hình nền.
     cfg: config::Config,
@@ -158,6 +196,9 @@ struct App {
     restack_until: Option<Instant>,
     cfg_mtime: Option<SystemTime>,
     open_settings_at_start: bool,
+    settings_hardware: Option<SettingsHardware>,
+    theme_job: Option<ThemeJob>,
+    theme_queue: std::collections::VecDeque<(String, String)>,
     gpu: Option<gfx::Gpu>,
     walls: Vec<Wall>,
     attach_error: bool,
@@ -200,6 +241,9 @@ impl App {
             cfg,
             cfg_mtime: config::modified(),
             open_settings_at_start,
+            settings_hardware: None,
+            theme_job: None,
+            theme_queue: std::collections::VecDeque::new(),
             gpu: None,
             walls: Vec::new(),
             attach_error: false,
@@ -223,10 +267,13 @@ impl App {
         }
     }
 
-    fn status(&self) -> Status {
+    fn status(&mut self) -> Status {
         let now = desktop::local_time();
-        let mons = desktop::monitors()
-            .iter()
+        let hardware = self.settings_hardware.get_or_insert_with(SettingsHardware::read);
+        if hardware.sampled.elapsed() >= Duration::from_millis(600) {
+            *hardware = SettingsHardware::read();
+        }
+        let mons = hardware.monitors.iter()
             .enumerate()
             .map(|(i, m)| {
                 let (w, h) = m.size();
@@ -254,7 +301,7 @@ impl App {
             auto_kind: config::auto_scene(&now),
             next_event: config::next_event(&now),
             gpu: self.gpu.as_ref().map(|g| g.adapter.get_info().name).unwrap_or_default(),
-            has_battery: bar::shell::battery_percent().is_some(),
+            has_battery: hardware.has_battery,
             message: self.message.clone(),
             message_for: self.message_for.clone(),
             paused_user: self.paused_user,
@@ -368,6 +415,10 @@ impl App {
 
     /// Dựng lại cảnh khi đổi theme / độ phân giải, và vẽ lại đồng hồ khi sang phút mới.
     fn ensure_scene(&mut self) {
+        self.ensure_scene_with(None);
+    }
+
+    fn ensure_scene_with(&mut self, mut prepared: Option<(&str, PreparedScene)>) {
         let Some(gpu) = &self.gpu else { return };
         let now = desktop::local_time();
         for wall in self.walls.iter_mut() {
@@ -375,12 +426,20 @@ impl App {
             let size = wall.renderer.size();
             if Some(kind) != wall.kind || size != wall.size {
                 let t0 = Instant::now();
-                let b = scenes::build(kind, size.0, size.1);
+                let prepared_for_wall = prepared.as_ref().is_some_and(|(name, scene)| {
+                    *name == wall.monitor.name && scene.kind == kind && scene.size == size
+                });
+                let scene = if prepared_for_wall {
+                    prepared.take().expect("scene matched this monitor").1
+                } else {
+                    PreparedScene::build(kind, size)
+                };
+                let PreparedScene { built: b, backdrop, .. } = scene;
                 wall.renderer.set_texture(gpu, Tex::Back, b.back.pm.width(), b.back.pm.height(), b.back.pm.data());
                 wall.renderer.set_texture(gpu, Tex::Front, b.front.pm.width(), b.front.pm.height(), b.front.pm.data());
                 let a = &b.atlas.pm;
                 wall.renderer.set_texture(gpu, Tex::Atlas, a.width(), a.height(), a.data());
-                wall.backdrop = bar::make_backdrop(&b.back.pm, &b.front.pm, size);
+                wall.backdrop = backdrop;
                 for bar in self.bars.iter_mut().filter(|b| b.monitor == wall.monitor.name) {
                     bar.set_backdrop(wall.backdrop.clone());
                 }
@@ -638,60 +697,157 @@ impl App {
         }
     }
 
+    fn cancel_theme(&mut self, monitor: &str) {
+        self.theme_queue.retain(|(name, _)| name != monitor);
+        if let Some(job) = self.theme_job.as_mut().filter(|j| j.monitor == monitor) {
+            job.cancelled = true;
+        }
+    }
+
+    /// A scheduling change does not need new textures or an Explorer taskbar refresh
+    /// if this monitor already displays the desired scene on both surfaces.
+    fn reuse_active_theme(&mut self, monitor: &str, theme: &str) -> bool {
+        let kind = config::kind_of(theme, &desktop::local_time());
+        let Some(wall) = self.walls.iter().find(|wall| wall.monitor.name == monitor && wall.kind == Some(kind)) else {
+            return false;
+        };
+        let primary = wall.monitor.primary;
+        let active = self.cfg.mon(monitor, primary);
+        if !active.wallpaper || !active.taskbar ||
+            !self.bars.iter().any(|bar| bar.monitor == monitor && bar.kind() == kind) {
+            return false;
+        }
+        self.cancel_theme(monitor);
+        if active.theme != theme || active.taskbar_theme != theme {
+            let applied = self.cfg.mon_mut(monitor, primary);
+            applied.theme = theme.into();
+            applied.taskbar_theme = theme.into();
+            self.draft.monitors.clone_from(&self.cfg.monitors);
+            config::save(&self.cfg);
+            self.cfg_mtime = config::modified();
+        }
+        self.message_for = monitor.into();
+        self.message = if theme == "auto" {
+            "Đã bật tự động cho màn hình này.".into()
+        } else {
+            format!("Đã chọn chủ đề {} cho màn hình này.", kind.name())
+        };
+        true
+    }
+
+    fn queue_theme(&mut self, monitor: String, theme: String) {
+        self.cancel_theme(&monitor);
+        self.message_for = monitor.clone();
+        self.message = "Đang chuẩn bị chủ đề…".into();
+        self.theme_queue.push_back((monitor, theme));
+    }
+
+    fn poll_theme(&mut self, el: &ActiveEventLoop) {
+        if self.theme_job.as_ref().is_some_and(|job| job.worker.is_finished()) {
+            let ThemeJob { monitor, theme, cancelled, worker } = self.theme_job.take().expect("finished worker");
+            if !cancelled {
+                match worker.join() {
+                    Ok(prepared) => self.apply_prepared_theme(monitor, theme, prepared, el),
+                    Err(_) => {
+                        self.message_for = monitor;
+                        self.message = "Không dựng được hình nền. Xem log.txt trong thư mục cấu hình.".into();
+                    }
+                }
+                if let Some(settings) = &self.settings {
+                    settings.window.request_redraw();
+                }
+            }
+        }
+        if self.theme_job.is_some() {
+            return;
+        }
+        while let Some((monitor, theme)) = self.theme_queue.pop_front() {
+            let Some(display) = desktop::monitors().into_iter().find(|m| m.name == monitor) else { continue };
+            let size = display.size();
+            let kind = config::kind_of(&theme, &desktop::local_time());
+            match std::thread::Builder::new().name("dung-chu-de".into()).spawn(move || PreparedScene::build(kind, size)) {
+                Ok(worker) => {
+                    self.theme_job = Some(ThemeJob { monitor, theme, cancelled: false, worker });
+                    break;
+                }
+                Err(error) => {
+                    log(&format!("không mở được luồng dựng chủ đề: {error}"));
+                    self.message_for = monitor;
+                    self.message = "Không bắt đầu được phiên dựng hình nền.".into();
+                    if let Some(settings) = &self.settings {
+                        settings.window.request_redraw();
+                    }
+                }
+            }
+        }
+    }
+
+    fn apply_prepared_theme(&mut self, name: String, theme: String, prepared: PreparedScene, el: &ActiveEventLoop) {
+        let monitors = desktop::monitors();
+        let Some((idx, m)) = monitors.iter().enumerate().find(|(_, m)| m.name == name) else { return };
+        let target = config::kind_of(&theme, &desktop::local_time());
+        if prepared.size != m.size() || prepared.kind != target {
+            self.queue_theme(name, theme);
+            return;
+        }
+        let previous = self.cfg.clone();
+        // Capture implicit defaults before either global flag changes.
+        for connected in &monitors {
+            self.cfg.mon_mut(&connected.name, connected.primary);
+        }
+        let selected = self.cfg.mon_mut(&name, m.primary);
+        selected.theme = theme.clone();
+        selected.taskbar_theme = theme;
+        selected.wallpaper = true;
+        selected.taskbar = true;
+        self.cfg.wallpaper_on = true;
+        self.cfg.taskbar_on = true;
+        self.attach_error = false;
+        let had_wall = self.walls.iter().any(|w| w.monitor.name == name);
+        if !had_wall {
+            self.create_wall(el, m.clone());
+        }
+        self.ensure_scene_with(Some((&name, prepared)));
+        let wall_ready = self.walls.iter().any(|w| w.monitor.name == name && w.kind.is_some());
+        if wall_ready {
+            if taskbar::applied() {
+                let _ = taskbar::restore();
+            }
+            self.sync_bars(el);
+        }
+        if wall_ready && self.bars.iter().any(|b| b.monitor == name) {
+            self.draft.monitors.clone_from(&self.cfg.monitors);
+            self.draft.wallpaper_on = self.cfg.wallpaper_on;
+            self.draft.taskbar_on = self.cfg.taskbar_on;
+            config::save(&self.cfg);
+            self.cfg_mtime = config::modified();
+            let kind = config::kind_of(&self.cfg.mon(&name, m.primary).theme, &desktop::local_time());
+            self.message_for = name.clone();
+            self.message = format!("Màn hình {}: đã áp dụng chủ đề {} cho hình nền và taskbar.", idx + 1, kind.name());
+        } else {
+            self.cfg = previous;
+            if !had_wall {
+                self.walls.retain(|w| w.monitor.name != name);
+            }
+            self.ensure_scene();
+            if wall_ready {
+                self.sync_bars(el);
+            }
+            self.message_for = name.clone();
+            self.message = format!("Màn hình {}: không áp dụng được cả bộ chủ đề. Xem log.txt trong thư mục cấu hình.", idx + 1);
+        }
+    }
+
     fn handle_actions(&mut self, actions: Vec<Action>, el: &ActiveEventLoop) {
         for a in actions {
             match a {
-                Action::ApplyTheme { monitor: name, theme } => {
-                    let monitors = desktop::monitors();
-                    let Some((idx, m)) = monitors.iter().enumerate().find(|(_, m)| m.name == name) else { continue };
-                    let previous = self.cfg.clone();
-                    // Capture implicit defaults before either global flag changes.
-                    for connected in &monitors {
-                        self.cfg.mon_mut(&connected.name, connected.primary);
-                    }
-                    let selected = self.cfg.mon_mut(&name, m.primary);
-                    selected.theme = theme.clone();
-                    selected.taskbar_theme = theme;
-                    selected.wallpaper = true;
-                    selected.taskbar = true;
-                    self.cfg.wallpaper_on = true;
-                    self.cfg.taskbar_on = true;
-                    self.attach_error = false;
-                    let had_wall = self.walls.iter().any(|w| w.monitor.name == name);
-                    if !had_wall {
-                        self.create_wall(el, m.clone());
-                    }
-                    self.ensure_scene();
-                    let wall_ready = self.walls.iter().any(|w| w.monitor.name == name && w.kind.is_some());
-                    if wall_ready {
-                        if taskbar::applied() {
-                            let _ = taskbar::restore();
-                        }
-                        self.sync_bars(el);
-                    }
-                    if wall_ready && self.bars.iter().any(|b| b.monitor == name) {
-                        self.draft.monitors.clone_from(&self.cfg.monitors);
-                        self.draft.wallpaper_on = self.cfg.wallpaper_on;
-                        self.draft.taskbar_on = self.cfg.taskbar_on;
-                        config::save(&self.cfg);
-                        self.cfg_mtime = config::modified();
-                        let kind = config::kind_of(&self.cfg.mon(&name, m.primary).theme, &desktop::local_time());
-                        self.message_for = name.clone();
-                        self.message = format!("Màn hình {}: đã áp dụng chủ đề {} cho hình nền và taskbar.", idx + 1, kind.name());
-                    } else {
-                        self.cfg = previous;
-                        if !had_wall {
-                            self.walls.retain(|w| w.monitor.name != name);
-                        }
-                        self.ensure_scene();
-                        if wall_ready {
-                            self.sync_bars(el);
-                        }
-                        self.message_for = name.clone();
-                        self.message = format!("Màn hình {}: không áp dụng được cả bộ chủ đề. Xem log.txt trong thư mục cấu hình.", idx + 1);
+                Action::ApplyTheme { monitor, theme } => {
+                    if !self.reuse_active_theme(&monitor, &theme) {
+                        self.queue_theme(monitor, theme);
                     }
                 }
                 Action::ResetTheme(name) => {
+                    self.cancel_theme(&name);
                     let monitors = desktop::monitors();
                     let Some((idx, m)) = monitors.iter().enumerate().find(|(_, m)| m.name == name) else { continue };
                     for connected in &monitors {
@@ -745,7 +901,6 @@ impl App {
                     self.message_for.clear();
                     self.message = "Đã áp dụng cài đặt chung cho mọi màn hình.".into();
                 }
-                Action::Quit => el.exit(),
                 Action::TogglePause => self.set_paused(!self.paused_user),
                 Action::OpenFolder => {
                     let _ = std::process::Command::new("explorer").arg(config::dir()).spawn();
@@ -984,7 +1139,11 @@ impl ApplicationHandler for App {
             prof::add("kiểm tra định kỳ", t);
             self.next_check = now + CHECK_EVERY;
         }
+        self.poll_theme(el);
         let mut wake = self.next_check;
+        if self.theme_job.is_some() {
+            wake = wake.min(now + Duration::from_millis(24));
+        }
         if let Some(s) = &mut self.settings {
             if let Some(t) = s.next_repaint {
                 if now >= t {

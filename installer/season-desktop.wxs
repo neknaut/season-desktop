@@ -31,7 +31,7 @@
              Description="Season Desktop - hinh nen dong va taskbar theo mua"
              Manufacturer="Nek NauT" />
 
-    <MajorUpgrade Schedule="afterInstallInitialize"
+    <MajorUpgrade Schedule="afterInstallInitialize" AllowSameVersionUpgrades="yes"
                   DowngradeErrorMessage="Da co ban Season Desktop moi hon tren may." />
     <MediaTemplate EmbedCab="yes" />
 
@@ -42,6 +42,12 @@
     <!-- Cài cho riêng người dùng -->
     <Property Id="ALLUSERS" Value="2" />
     <Property Id="MSIINSTALLPERUSER" Value="1" />
+    <Property Id="PREVIOUSSEASONDIR" Secure="yes">
+      <RegistrySearch Id="PreviousSeasonDir" Root="HKCU" Key="Software\Nek NauT\Season Desktop"
+                      Name="InstallDir" Type="raw" Win64="yes" />
+    </Property>
+    <SetProperty Id="PreviousSeasonExe" Value="[PREVIOUSSEASONDIR]season-desktop.exe"
+                 Before="QuitPreviousApp" Sequence="execute">PREVIOUSSEASONDIR AND NOT REMOVE</SetProperty>
 
     <!-- Thư mục cài: %LOCALAPPDATA%\Programs\Season Desktop -->
     <Directory Id="TARGETDIR" Name="SourceDir">
@@ -106,6 +112,8 @@
          Chạy trước khi Windows kiểm tra file đang dùng, khi gỡ hẳn (không phải lúc nâng cấp). -->
     <!-- 1) Tắt app trước khi Windows kiểm tra file đang dùng (cả khi gỡ lẫn khi nâng cấp).
             Tiến trình canh của app chạy bằng tài khoản người dùng sẽ tự trả taskbar gốc. -->
+    <CustomAction Id="QuitPreviousApp" Property="PreviousSeasonExe" ExeCommand="--quit-app"
+                  Execute="immediate" Return="ignore" />
     <CustomAction Id="QuitApp" FileKey="AppExeFile" ExeCommand="--quit-app" Execute="immediate" Return="ignore" />
     <!-- 2) Khi gỡ hẳn: trả lại hình nền gốc, bỏ khởi động cùng Windows và trả taskbar nếu còn sót.
             Chạy ngay (immediate) trong phiên của người dùng, trước khi xoá file. -->
@@ -115,6 +123,7 @@
 
     <InstallExecuteSequence>
       <Custom Action="RestoreUser" Before="QuitApp">REMOVE="ALL" AND NOT UPGRADINGPRODUCTCODE</Custom>
+      <Custom Action="QuitPreviousApp" Before="RestoreUser">PreviousSeasonExe AND NOT REMOVE</Custom>
       <Custom Action="QuitApp" Before="InstallValidate">REMOVE="ALL"</Custom>
       <Custom Action="LaunchApp" After="InstallFinalize">NOT Installed AND NOT REMOVE AND UILevel &gt;= 5</Custom>
     </InstallExecuteSequence>

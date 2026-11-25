@@ -24,7 +24,7 @@ use winit::event_loop::ActiveEventLoop;
 use winit::window::Window;
 
 use crate::desktop::{local_time, Monitor};
-use crate::paint::{c, ca, rad, round_rect_path, solid, star_path, Canvas};
+use crate::paint::{lin, c, ca, rad, round_rect_path, solid, star_path, Canvas};
 use crate::scenes::Kind;
 use crate::widget;
 
@@ -61,11 +61,14 @@ struct Look {
     border: (u8, u8, u8, f32),
     fg: [u8; 3],
     acc: [u8; 3],
+    reflection: [u8; 3],
 }
 
 fn look(kind: Kind) -> Look {
     let theme = kind.theme();
-    Look { bg: theme.bar_bg, border: theme.bar_border, fg: theme.fg, acc: theme.acc }
+    let reflection = theme.dots[1].to_be_bytes();
+    Look { bg: theme.bar_bg, border: theme.bar_border, fg: theme.fg, acc: theme.acc,
+        reflection: [reflection[1], reflection[2], reflection[3]] }
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -594,6 +597,10 @@ impl Bar {
         Some(b)
     }
 
+    pub fn kind(&self) -> Kind {
+        self.kind
+    }
+
     pub fn set_kind(&mut self, kind: Kind) {
         if kind != self.kind {
             self.kind = kind;
@@ -704,7 +711,10 @@ impl Bar {
         for (i, p) in self.pins.iter().enumerate() {
             let key = format!("pin:{}", p.lnk.to_lowercase());
             let mine: Vec<&(isize, String, String, String)> = wins.iter().filter(|w| !used.contains(&w.0) && belongs(p, w)).collect();
-            let icon = take_icon(&key).or_else(|| p.icon.clone().and_then(to_pm));
+            let icon = take_icon(&key).or_else(|| p.icon.clone().and_then(to_pm)).or_else(|| {
+                let (h, exe, _, id) = mine.first().copied()?;
+                shell::window_icon_for(*h, exe, id, px as i32).and_then(to_pm)
+            });
             match mine.first() {
                 Some(first) => {
                     used.extend(mine.iter().map(|w| w.0));
@@ -1253,7 +1263,8 @@ impl Bar {
                     }
                     // Bấm vào icon khay: gửi thẳng cho app như taskbar gốc
                     Hit::Tray(i) => self.click_tray(i, false),
-                    Hit::Net | Hit::Volume => shell::press(&[shell::KEY_WIN, shell::KEY_A]),
+                    Hit::Net => shell::open_network_flyout(),
+                    Hit::Volume => shell::press(&[shell::KEY_WIN, shell::KEY_A]),
                     // Lịch tháng của chính taskbar này
                     Hit::Clock => {
                         if !self.just_closed(2) {
@@ -1913,43 +1924,56 @@ impl Bar {
     }
 
     fn island(&self, cv: &mut Canvas, x: f32, y: f32, w: f32, h: f32, lk: &Look) {
-        for i in 0..3 {
-            let s = 2.0 + i as f32 * 5.0;
-            if let Some(p) = round_rect_path(x - s * 0.5, y + 6.0 + s * 0.3, w + s, h + s * 0.3, 18.0 + s * 0.5) {
-                cv.fill(&p, solid(ca(0, 0, 0, 0.060)));
+        let radius = (h * 0.5).min(w * 0.5);
+        for (spread, alpha) in [(2.0, 0.14), (7.0, 0.07)] {
+            if let Some(shadow) = round_rect_path(x - spread * 0.5, y + 4.0, w + spread, h + spread * 0.4, radius + spread * 0.5) {
+                cv.fill(&shadow, solid(ca(0, 0, 0, alpha)));
             }
         }
-        let Some(path) = round_rect_path(x, y, w, h, 18.0) else { return };
-        match &self.backdrop {
-            Some(bd) => {
-                let band = BAND.min((self.mon.bottom - self.mon.top) as u32) as f32;
-                let ts = Transform::from_row(
-                    self.wpx as f32 / (bd.width() as f32 * self.k), 0.0,
-                    0.0, band / (bd.height() as f32 * self.k),
-                    0.0, (self.hpx as f32 - band) / self.k,
-                );
-                cv.fill(&path, Pattern::new(bd.as_ref(), SpreadMode::Pad, FilterQuality::Bilinear, 1.0, ts));
-            }
-            None => cv.fill(&path, solid(ca(18, 20, 28, 0.62))),
+        let Some(path) = round_rect_path(x, y, w, h, radius) else { return };
+        if let Some(bd) = &self.backdrop {
+            let band = BAND.min((self.mon.bottom - self.mon.top) as u32) as f32;
+            let band_top = (self.hpx as f32 - band) / self.k;
+            let (mx, my) = (x + w * 0.5, y + h * 0.5);
+            let (zx, zy) = (1.075, 1.12);
+            let transform = Transform::from_row(
+                zx * self.wpx as f32 / (bd.width() as f32 * self.k), 0.0,
+                0.0, zy * band / (bd.height() as f32 * self.k),
+                mx * (1.0 - zx), my + (band_top - my) * zy,
+            );
+            cv.fill(&path, Pattern::new(bd.as_ref(), SpreadMode::Pad, FilterQuality::Bilinear, 0.83, transform));
+        } else {
+            cv.fill(&path, solid(ca(19, 23, 35, 0.62)));
         }
+
+        // Lớp màu chủ đề phủ mỏng để kính trong như Liquid Glass, vẫn đủ tối cho chữ sáng.
         let (r, g, b, a) = lk.bg;
-        let tint = crate::paint::lin(x, y, x, y + h, &[
-            (0.0, ca(r, g, b, (a + 0.12).min(1.0))),
-            (1.0, ca(r / 2, g / 2, b / 2, (a + 0.25).min(1.0))),
-        ]);
-        cv.fill(&path, tint);
-        let (r, g, b, a) = lk.border;
-        cv.stroke(&path, solid(ca(r, g, b, a)), 1.0);
+        cv.fill(&path, lin(x, y, x, y + h, &[
+            (0.0, ca(r, g, b, a * 0.42)),
+            (0.48, ca(r / 2, g / 2, b / 2, a * 0.58)),
+            (1.0, ca(r, g, b, a * 0.50)),
+        ]));
+        let [r, g, b] = lk.reflection;
+        cv.fill(&path, rad(x + w * 0.23, y - h * 0.35, x + w * 0.23, y - h * 0.35, w.max(h) * 0.64, &[
+            (0.0, ca(r, g, b, 0.26)),
+            (1.0, ca(r, g, b, 0.0)),
+        ]));
+
         let [r, g, b] = lk.acc;
-        if w > 46.0 {
-            let left = x + 18.0;
-            let right = x + w - 18.0;
-            let rim = crate::paint::lin(left, y, right, y, &[
-                (0.0, ca(r, g, b, 0.04)),
-                (0.50, ca(r, g, b, 0.56)),
-                (1.0, ca(r, g, b, 0.04)),
-            ]);
-            cv.line(left, y + 1.3, right, y + 1.3, rim, 1.3);
+        let (br, bg, bb, ba) = lk.border;
+        cv.stroke(&path, lin(x, y, x + w * 0.28, y + h, &[
+            (0.0, ca(255, 255, 255, 0.69)),
+            (0.40, ca(br, bg, bb, ba * 0.8)),
+            (0.68, ca(br, bg, bb, ba * 0.5)),
+            (1.0, ca(r, g, b, 0.56)),
+        ]), 1.3);
+        if let Some(inner) = round_rect_path(x + 2.0, y + 2.0, w - 4.0, h - 4.0, (radius - 2.0).max(1.0)) {
+            cv.stroke(&inner, lin(x, y, x, y + h, &[
+                (0.0, ca(255, 255, 255, 0.22)),
+                (0.28, ca(255, 255, 255, 0.0)),
+                (0.78, ca(r, g, b, 0.0)),
+                (1.0, ca(r, g, b, 0.25)),
+            ]), 0.9);
         }
     }
 
@@ -2166,7 +2190,10 @@ impl Bar {
         // ---------- đảo phải: cài đặt, khay ẩn, hệ thống, đồng hồ
         let time = format!("{:02}:{:02}", now.hour, now.minute);
         let date = format!("{:02}/{:02}/{}", now.day, now.month, now.year);
-        let clock_w = (widget::measure(&fonts.regular, 14.0 * k, &time).max(widget::measure(&fonts.regular, 11.5 * k, &date))) / k;
+        let (time_size, date_size) = (15.5, 13.0);
+        let time_width = widget::measure(&fonts.regular, time_size * k, &time) / k;
+        let date_width = widget::measure(&fonts.regular, date_size * k, &date) / k;
+        let clock_w = time_width.max(date_width);
         let net_icon = match self.net {
             shell::Net::Wifi => Icon::Wifi,
             shell::Net::Ethernet => Icon::Ethernet,
@@ -2242,10 +2269,8 @@ impl Bar {
         let clock_x = ix + 25.0;
         self.hover_bg(&mut cv, Hit::Clock, clock_x - 6.0, y + 10.0, clock_w + 12.0, 38.0);
         hits.push((Rect::from_xywh(clock_x - 6.0, y + 8.0, clock_w + 12.0, 42.0).unwrap(), Hit::Clock));
-        let tw1 = widget::measure(&fonts.regular, 14.0 * k, &time) / k;
-        let tw2 = widget::measure(&fonts.regular, 11.5 * k, &date) / k;
-        texts.push((false, 14.0, clock_x + clock_w - tw1, y + 27.0, fg_rgb, 1.0, time));
-        texts.push((false, 11.5, clock_x + clock_w - tw2, y + 43.0, fg_rgb, 0.75, date));
+        texts.push((false, time_size, clock_x + clock_w - time_width, y + 27.0, fg_rgb, 1.0, time));
+        texts.push((false, date_size, clock_x + clock_w - date_width, y + 44.0, fg_rgb, 0.88, date));
 
         if let Some(c) = saved {
             cv = c;
@@ -2433,6 +2458,30 @@ impl Bar {
                 shape(cv, &[(-5.0, 0.0), (-2.6, -2.9), (-1.2, 0.0)], ink);
                 shape(cv, &[(1.2, 0.0), (3.0, -2.9), (5.3, 0.0)], ink);
                 cv.line(cx - 3.2, cy + 4.0, cx + 3.2, cy + 4.0, solid(ink), 1.5);
+            }
+            Kind::HungKings => {
+                shape(cv, &[(-10.0, -1.0), (0.0, -8.0), (10.0, -1.0)], acc);
+                for dx in [-6.0, 0.0, 6.0] {
+                    cv.line(cx + dx, cy + 1.0, cx + dx, cy + 7.0, solid(second), 1.8);
+                }
+                cv.line(cx - 9.0, cy + 8.0, cx + 9.0, cy + 8.0, solid(acc), 1.5);
+            }
+            Kind::DoanNgo => {
+                cv.line(cx, cy - 2.0, cx + 2.0, cy - 9.0, solid(second), 1.5);
+                cv.ellipse(cx + 5.0, cy - 7.0, 4.0, 1.7, -0.4, solid(second));
+                cv.circle(cx - 4.0, cy + 3.0, 4.7, solid(first));
+                cv.circle(cx + 4.0, cy + 2.0, 4.8, solid(third));
+                cv.circle(cx + 1.0, cy + 6.0, 4.1, solid(acc));
+            }
+            Kind::Remembrance => {
+                cv.round_rect(cx - 3.0, cy - 1.0, 6.0, 10.0, 1.5, solid(second));
+                shape(cv, &[(-3.2, -3.1), (0.6, -10.2), (3.4, -4.0), (0.0, -1.8)], acc);
+                cv.line(cx - 6.0, cy + 9.0, cx + 6.0, cy + 9.0, solid(first), 1.2);
+            }
+            Kind::CultureDay => {
+                shape(cv, &[(-8.4, -7.0), (7.0, -7.0), (9.0, 7.0), (-6.3, 8.0)], second);
+                cv.ellipse(cx, cy, 4.6, 3.8, -0.2, solid(third));
+                shape(cv, &[(-4.0, 1.0), (0.0, -4.3), (4.2, 1.8)], acc);
             }
             Kind::Teachers => {
                 shape(cv, &[(-9.0, -6.4), (-1.0, -4.1), (-1.0, 7.7), (-9.0, 5.2)], first);
@@ -2622,6 +2671,12 @@ impl Bar {
                         cv.stroke(&path, solid(web), 0.8);
                     }
                 }
+            }
+            Kind::HungKings | Kind::DoanNgo | Kind::Remembrance | Kind::CultureDay => {
+                let [r, g, b] = self.kind.theme().acc;
+                let acc = ca(r, g, b, 1.0);
+                self.season_glyph(cv, x + 25.0, y - 8.0, acc);
+                self.season_glyph(cv, right - 25.0, y - 8.0, acc);
             }
             Kind::Teachers => {
                 // cuốn sách mở và bông hoa

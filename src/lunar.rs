@@ -127,6 +127,20 @@ pub fn solar_to_lunar(dd: u32, mm: u32, yy: i32) -> (u32, u32, i32, bool) {
     (lunar_day as u32, lunar_month as u32, lunar_year as i32, leap)
 }
 
+/// Số ngày từ 1/1 dương lịch tới một ngày trong tháng âm lịch chính (không nhuận).
+/// Dùng cho các lễ thuộc tháng 1–10 âm lịch của cùng năm.
+pub fn lunar_days_from_january(day: u32, month: u32, year: i32) -> i64 {
+    let year = i64::from(year);
+    let a11 = lunar_month11(year - 1);
+    let b11 = lunar_month11(year);
+    let k = ((a11 as f64 - 2415021.076998695) / 29.530588853 + 0.5).floor() as i64;
+    let mut offset = i64::from(month) + 1;
+    if b11 - a11 > 365 && offset >= leap_month_offset(a11) {
+        offset += 1;
+    }
+    new_moon_day(k + offset) + i64::from(day) - 1 - jd_from_date(1, 1, year)
+}
+
 /// Tên năm âm lịch theo can chi, ví dụ 2026 -> "Bính Ngọ".
 pub fn can_chi(year: i32) -> String {
     const CAN: [&str; 10] = ["Canh", "Tân", "Nhâm", "Quý", "Giáp", "Ất", "Bính", "Đinh", "Mậu", "Kỷ"];

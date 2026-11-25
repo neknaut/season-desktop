@@ -187,6 +187,8 @@ pub(super) fn paint(kind: Kind, cv: &mut Canvas, l: Layout) {
             row_houses(cv, l, y + l.h * 0.033, [0x3b304a, 0x49334c, 0x352b45], 0x242137);
         }
         Kind::Teachers => row_houses(cv, l, y, [0xd3a275, 0xe1ba86, 0xd8ac7d], 0x86635a),
+        Kind::HungKings | Kind::Remembrance => firs(cv, l, y, [0x537749, 0x304f3d]),
+        Kind::DoanNgo | Kind::CultureDay => row_houses(cv, l, y, [0xc49364, 0xdfb783, 0xbe8255], 0x70473a),
         Kind::Noel => firs(cv, l, l.h * 0.62, [0x355483, 0x233e64]),
         Kind::Tet => row_houses(cv, l, l.h * 0.82, [0x8b4537, 0x995442, 0x81413b], 0x522932),
         Kind::Moon => {

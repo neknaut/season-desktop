@@ -35,45 +35,61 @@ impl Tray {
 
 /// Render the same icon for the tray, settings, window and exported ICO.
 fn icon_pixmap(n: u32) -> tiny_skia::Pixmap {
-    use crate::paint::{c, ca, lin, solid, Canvas};
-    use tiny_skia::{FilterQuality, PathBuilder, Pixmap, PixmapPaint, Transform};
+    use crate::paint::{c, lin, solid, Canvas};
+    use tiny_skia::{PathBuilder, Transform};
 
-    const SS: u32 = 4;
-    let size = n * SS;
-    let mut cv = Canvas::new(size, size, Transform::from_scale(size as f32 / 64.0, size as f32 / 64.0));
-    cv.round_rect(2.0, 2.0, 60.0, 60.0, 16.0,
-        lin(6.0, 4.0, 55.0, 60.0, &[(0.0, c(0x263752)), (1.0, c(0x121b30))]));
-    if let Some(edge) = crate::paint::round_rect_path(2.6, 2.6, 58.8, 58.8, 15.4) {
-        cv.stroke(&edge, solid(ca(196, 218, 255, 0.26)), 1.1);
+    // Rasterize each frame directly at its target size, including small Windows tray sizes.
+    let mut cv = Canvas::new(n, n, Transform::from_scale(n as f32 / 64.0, n as f32 / 64.0));
+    let zoom = if n <= 16 { 1.02 } else { 1.08 };
+    cv.base = cv.base.pre_translate(31.6, 32.0).pre_scale(zoom, zoom).pre_translate(-32.0, -32.0);
+    let base = cv.base;
+    let small = n <= 24;
+    for (x, angle, color) in [(9.0, -22.0, 0x58d3ba), (24.0, 22.0, 0x9179f3)] {
+        cv.base = base.pre_rotate_at(angle, x + 16.0, 32.0);
+        cv.round_rect(x, 12.0, 32.0, 42.0, 7.0, solid(c(0x283253)));
+        cv.round_rect(x + 2.0, 14.0, 28.0, 38.0, 5.0, solid(c(color)));
     }
-    let petal_tones = [
-        (0xffccb4, 0xf58b87), // spring
-        (0xffeb99, 0xf6bb54), // summer
-        (0xffc182, 0xe97756), // autumn
-        (0xbbf7f0, 0x59b9ce), // winter
-    ];
-    for (i, (high, low)) in petal_tones.into_iter().enumerate() {
-        let angle = i as f32 * std::f32::consts::FRAC_PI_2 + 0.12;
-        let original = cv.base;
-        cv.base = original.pre_translate(32.0, 32.0).pre_rotate(angle.to_degrees());
-        let mut p = PathBuilder::new();
-        p.move_to(2.8, -2.6);
-        p.cubic_to(1.0, -10.3, 6.8, -20.7, 15.6, -20.8);
-        p.cubic_to(22.6, -20.9, 23.7, -16.0, 19.1, -10.4);
-        p.cubic_to(14.2, -4.7, 7.1, -3.0, 2.8, -2.6);
-        p.close();
-        if let Some(path) = p.finish() {
-            cv.fill(&path, lin(14.0, -19.0, 5.0, -2.0, &[(0.0, c(high)), (1.0, c(low))]));
-        }
-        cv.base = original;
-    }
-    cv.circle(32.0, 32.0, 4.1, solid(c(0xfff3d5)));
+    cv.base = base;
 
-    let mut small = Pixmap::new(n, n).expect("valid icon dimensions");
-    small.draw_pixmap(0, 0, cv.pm.as_ref(),
-        &PixmapPaint { quality: FilterQuality::Bicubic, ..Default::default() },
-        Transform::from_scale(1.0 / SS as f32, 1.0 / SS as f32), None);
-    small
+    let mut sheet = PathBuilder::new();
+    sheet.move_to(23.0, 6.0);
+    sheet.line_to(38.0, 6.0);
+    sheet.line_to(50.0, 18.0);
+    sheet.line_to(50.0, 53.0);
+    sheet.quad_to(50.0, 58.0, 45.0, 58.0);
+    sheet.line_to(23.0, 58.0);
+    sheet.quad_to(17.0, 58.0, 17.0, 52.0);
+    sheet.line_to(17.0, 12.0);
+    sheet.quad_to(17.0, 6.0, 23.0, 6.0);
+    sheet.close();
+    if let Some(path) = sheet.finish() {
+        let paint = if small { solid(c(0xffbf71)) } else {
+            lin(21.0, 16.0, 51.0, 55.0, &[(0.0, c(0xffd087)), (1.0, c(0xf78b82))])
+        };
+        cv.stroke(&path, solid(c(0x283253)), 2.5);
+        cv.fill(&path, paint);
+    }
+
+    let mut fold = PathBuilder::new();
+    fold.move_to(38.0, 6.0);
+    fold.line_to(50.0, 18.0);
+    fold.line_to(41.0, 18.0);
+    fold.quad_to(38.0, 18.0, 38.0, 15.0);
+    fold.close();
+    if let Some(path) = fold.finish() {
+        cv.fill(&path, solid(c(0xffecc6)));
+    }
+
+    let mut moon = PathBuilder::new();
+    moon.move_to(33.5, 26.0);
+    moon.cubic_to(31.7, 33.4, 36.0, 37.8, 42.0, 37.2);
+    moon.cubic_to(40.7, 43.5, 33.3, 45.7, 28.9, 41.5);
+    moon.cubic_to(23.6, 36.5, 26.2, 28.1, 33.5, 26.0);
+    moon.close();
+    if let Some(path) = moon.finish() {
+        cv.fill(&path, solid(c(0x583869)));
+    }
+    cv.pm
 }
 
 pub fn icon_rgba(n: u32) -> (Vec<u8>, u32) {
@@ -88,7 +104,7 @@ pub fn icon_rgba(n: u32) -> (Vec<u8>, u32) {
 
 /// Icon của app dạng file .ico (nhiều cỡ, mỗi cỡ là một ảnh PNG).
 pub fn icon_ico() -> Vec<u8> {
-    let sizes = [16u32, 24, 32, 48, 64, 128, 256];
+    let sizes = [16u32, 20, 24, 32, 40, 48, 64, 96, 128, 256];
     let mut images: Vec<Vec<u8>> = Vec::new();
     for &n in &sizes {
         images.push(icon_pixmap(n).encode_png().expect("PNG icon encoding"));

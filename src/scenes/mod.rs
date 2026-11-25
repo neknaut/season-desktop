@@ -17,7 +17,7 @@ mod tet;
 use tiny_skia::Transform;
 
 use crate::config::Config;
-use crate::draw::{DrawList, H, W};
+use crate::draw::{DrawList, Tex, H, W};
 use crate::paint::{Atlas, Canvas};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -40,6 +40,10 @@ pub enum Kind {
     VnWomen,
     Halloween,
     Teachers,
+    HungKings,
+    DoanNgo,
+    Remembrance,
+    CultureDay,
 }
 
 /// Màu và chữ riêng của từng chủ đề (taskbar, đồng hồ, cửa sổ cài đặt).
@@ -56,7 +60,7 @@ pub struct Theme {
 
 impl Kind {
     /// Mọi chủ đề, theo thứ tự hiện trong cài đặt: các mùa, rồi các ngày lễ trong năm.
-    pub const ALL: [Kind; 16] = [
+    pub const ALL: [Kind; 20] = [
         Kind::Spring,
         Kind::Summer,
         Kind::Autumn,
@@ -65,13 +69,17 @@ impl Kind {
         Kind::Tet,
         Kind::Valentine,
         Kind::Women,
+        Kind::HungKings,
         Kind::Reunify,
         Kind::Children,
+        Kind::DoanNgo,
+        Kind::Remembrance,
         Kind::National,
         Kind::Moon,
         Kind::VnWomen,
         Kind::Halloween,
         Kind::Teachers,
+        Kind::CultureDay,
         Kind::Noel,
     ];
 
@@ -93,6 +101,10 @@ impl Kind {
             Kind::VnWomen => "Phụ nữ Việt Nam 20/10",
             Kind::Halloween => "Halloween",
             Kind::Teachers => "Nhà giáo Việt Nam 20/11",
+            Kind::HungKings => "Giỗ Tổ Hùng Vương",
+            Kind::DoanNgo => "Tết Đoan Ngọ",
+            Kind::Remembrance => "Ngày Thương binh, Liệt sĩ 27/7",
+            Kind::CultureDay => "Ngày Văn hóa Việt Nam 24/11",
         }
     }
 
@@ -115,6 +127,10 @@ impl Kind {
             Kind::VnWomen => "vnwomen",
             Kind::Halloween => "halloween",
             Kind::Teachers => "teachers",
+            Kind::HungKings => "hung-kings",
+            Kind::DoanNgo => "doan-ngo",
+            Kind::Remembrance => "remembrance",
+            Kind::CultureDay => "culture-day",
         }
     }
 
@@ -141,6 +157,10 @@ impl Kind {
             Kind::VnWomen => "Áo dài và hoa sen",
             Kind::Halloween => "Phố nhỏ và giỏ kẹo bí ngô",
             Kind::Teachers => "Tặng hoa trong sân trường",
+            Kind::HungKings => "Rước kiệu lên Đền Hùng",
+            Kind::DoanNgo => "Mâm bánh tro và trái cây ngày hè",
+            Kind::Remembrance => "Dâng hoa và thắp nến tưởng niệm",
+            Kind::CultureDay => "In tranh Đông Hồ ở sân đình",
         }
     }
 
@@ -163,6 +183,10 @@ impl Kind {
             Kind::Children => t((33, 61, 88, 0.59), (154, 213, 248, 0.41), [242, 250, 255], [162, 225, 255], [0xf98b84, 0xffd97d, 0xa1dcff]),
             Kind::Halloween => t((47, 28, 59, 0.68), (233, 145, 88, 0.52), [255, 243, 230], [255, 178, 109], [0xee8e48, 0x8b6bc2, 0x683c78]),
             Kind::Teachers => t((51, 64, 49, 0.62), (235, 192, 113, 0.45), [255, 248, 228], [255, 213, 130], [0xf7c66d, 0xf4dcaf, 0xc29569]),
+            Kind::HungKings => t((31, 52, 39, 0.76), (214, 173, 94, 0.55), [255, 246, 223], [249, 207, 118], [0xd1a758, 0x627d50, 0xab493f]),
+            Kind::DoanNgo => t((67, 39, 65, 0.74), (237, 174, 127, 0.53), [255, 247, 236], [255, 194, 128], [0xa65372, 0x8ea456, 0xf3b575]),
+            Kind::Remembrance => t((34, 45, 57, 0.78), (191, 177, 136, 0.48), [248, 245, 237], [231, 201, 137], [0x717e86, 0xe2c489, 0xb8bd9b]),
+            Kind::CultureDay => t((37, 47, 73, 0.76), (237, 166, 117, 0.54), [255, 246, 228], [255, 192, 122], [0x59688c, 0xc77550, 0xe6b85e]),
         }
     }
 
@@ -185,6 +209,10 @@ impl Kind {
             Kind::VnWomen => "Mừng ngày Phụ nữ Việt Nam",
             Kind::Halloween => "Happy Halloween",
             Kind::Teachers => "Tri ân thầy cô",
+            Kind::HungKings => "Nhớ về cội nguồn",
+            Kind::DoanNgo => "Tết Đoan Ngọ an lành",
+            Kind::Remembrance => "Đời đời ghi nhớ công ơn",
+            Kind::CultureDay => "Gìn giữ nét Việt",
         }
     }
 
@@ -203,6 +231,10 @@ impl Kind {
             Kind::Women | Kind::VnWomen => Some(([0x3d, 0x1d, 0x5c], [0xc2, 0x18, 0x5b])),
             Kind::Children => Some(([0x16, 0x32, 0x4f], [0xd9, 0x48, 0x0f])),
             Kind::Teachers => Some(([0x5a, 0x35, 0x10], [0xc2, 0x41, 0x0c])),
+            Kind::HungKings => Some(([0x24, 0x33, 0x20], [0x68, 0x33, 0x22])),
+            Kind::DoanNgo => Some(([0x39, 0x24, 0x36], [0x73, 0x30, 0x50])),
+            Kind::Remembrance => Some(([0x23, 0x2d, 0x38], [0x54, 0x40, 0x22])),
+            Kind::CultureDay => Some(([0x25, 0x30, 0x47], [0x79, 0x3b, 0x25])),
             _ => None,
         }
     }
@@ -245,7 +277,7 @@ pub fn load_art(theme: &str, name: &str) -> Option<tiny_skia::Pixmap> {
     }
 }
 
-pub trait Scene {
+pub trait Scene: Send {
     fn clock_position(&self, kind: Kind, layout: Layout) -> (f32, f32) {
         crate::widget::position(kind, layout, false)
     }
@@ -253,6 +285,18 @@ pub trait Scene {
     /// Cảnh có chuyển động hay không (cảnh tĩnh thì không cần vẽ lại liên tục).
     fn animated(&self) -> bool {
         true
+    }
+}
+
+struct StillPainting;
+
+impl Scene for StillPainting {
+    fn frame(&mut self, _: f32, _: f32, _: &Config, dl: &mut DrawList) {
+        dl.layer(Tex::Back);
+    }
+
+    fn animated(&self) -> bool {
+        false
     }
 }
 
@@ -295,6 +339,7 @@ pub fn build(kind: Kind, sw: u32, sh: u32) -> Built {
         Kind::Noel => Box::new(noel::Noel::build(&mut back, &mut front, &mut atlas, l, painted)),
         Kind::Tet => Box::new(tet::Tet::build(&mut back, &mut front, &mut atlas, l, painted)),
         Kind::Moon => Box::new(moon::Moon::build(&mut back, &mut front, &mut atlas, l, painted)),
+        Kind::HungKings | Kind::DoanNgo | Kind::Remembrance | Kind::CultureDay if painted => Box::new(StillPainting),
         k => Box::new(festive::Festive::build(k, &mut back, &mut front, &mut atlas, l, painted)),
     };
     let default_clock = scene.clock_position(kind, l);

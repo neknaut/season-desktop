@@ -8,6 +8,10 @@ pub(super) fn load(kind: Kind, portrait: bool) -> Option<Pixmap> {
         (Kind::Moon, true) => include_bytes!("../../assets/paintings/moon-portrait.png"),
         (Kind::Winter, true) => include_bytes!("../../assets/paintings/winter-portrait.png"),
         (Kind::Teachers, true) => include_bytes!("../../assets/paintings/teachers-portrait.png"),
+        (Kind::HungKings, true) => include_bytes!("../../assets/paintings/hung-kings-portrait.png"),
+        (Kind::DoanNgo, true) => include_bytes!("../../assets/paintings/doan-ngo-portrait.png"),
+        (Kind::Remembrance, true) => include_bytes!("../../assets/paintings/remembrance-portrait.png"),
+        (Kind::CultureDay, true) => include_bytes!("../../assets/paintings/culture-day-portrait.png"),
         (Kind::Noel, true) => include_bytes!("../../assets/paintings/noel-portrait.png"),
         (Kind::Spring, true) => include_bytes!("../../assets/paintings/spring-portrait.png"),
         (Kind::Summer, true) => include_bytes!("../../assets/paintings/summer-portrait.png"),
@@ -36,6 +40,10 @@ pub(super) fn load(kind: Kind, portrait: bool) -> Option<Pixmap> {
         (Kind::VnWomen, _) => include_bytes!("../../assets/paintings/vnwomen.png"),
         (Kind::Halloween, _) => include_bytes!("../../assets/paintings/halloween.png"),
         (Kind::Teachers, _) => include_bytes!("../../assets/paintings/teachers.png"),
+        (Kind::HungKings, _) => include_bytes!("../../assets/paintings/hung-kings.png"),
+        (Kind::DoanNgo, _) => include_bytes!("../../assets/paintings/doan-ngo.png"),
+        (Kind::Remembrance, _) => include_bytes!("../../assets/paintings/remembrance.png"),
+        (Kind::CultureDay, _) => include_bytes!("../../assets/paintings/culture-day.png"),
     };
     Pixmap::decode_png(bytes).ok()
 }
@@ -98,7 +106,15 @@ pub(crate) fn thumbnail(kind: Kind, portrait: bool) -> Option<Pixmap> {
         (Kind::Halloween, true) => include_bytes!("../../assets/previews/halloween-portrait.png"),
         (Kind::Halloween, false) => include_bytes!("../../assets/previews/halloween.png"),
         (Kind::Teachers, true) => include_bytes!("../../assets/previews/teachers-portrait.png"),
+        (Kind::HungKings, true) => include_bytes!("../../assets/previews/hung-kings-portrait.png"),
+        (Kind::DoanNgo, true) => include_bytes!("../../assets/previews/doan-ngo-portrait.png"),
+        (Kind::Remembrance, true) => include_bytes!("../../assets/previews/remembrance-portrait.png"),
+        (Kind::CultureDay, true) => include_bytes!("../../assets/previews/culture-day-portrait.png"),
         (Kind::Teachers, false) => include_bytes!("../../assets/previews/teachers.png"),
+        (Kind::HungKings, false) => include_bytes!("../../assets/previews/hung-kings.png"),
+        (Kind::DoanNgo, false) => include_bytes!("../../assets/previews/doan-ngo.png"),
+        (Kind::Remembrance, false) => include_bytes!("../../assets/previews/remembrance.png"),
+        (Kind::CultureDay, false) => include_bytes!("../../assets/previews/culture-day.png"),
         (Kind::Noel, true) => include_bytes!("../../assets/previews/noel-portrait.png"),
         (Kind::Noel, false) => include_bytes!("../../assets/previews/noel.png"),
     };

@@ -9,7 +9,7 @@ Vietnamese / international holidays.
 ## Features
 
 - **Live wallpaper** under the desktop icons, one scene per monitor, with landscape and portrait layouts.
-- **16 themes**: spring, summer, autumn, winter, Lunar New Year, New Year, Christmas, Mid-Autumn, Valentine's Day,
+- **20 themes**: spring, summer, autumn, winter, Lunar New Year, New Year, Christmas, Mid-Autumn, Valentine's Day, Hung Kings Commemoration, Tết Đoan Ngọ, Vietnamese Remembrance Day (July 27), Vietnamese Culture Day (November 24),
   International Women's Day, Vietnamese Women's Day, Reunification Day, National Day, Children's Day,
   Teachers' Day and Halloween.
 - **Automatic mode**: the seasonal theme on normal days; the holiday theme starts 3 days before a holiday
@@ -102,7 +102,7 @@ The installed `season-desktop.exe` accepts:
 | *(none)* | Start the app and open the settings window |
 | `--minimized` | Start in the background (used when starting with Windows) |
 | `--restore` | Stop the running app and restore the Windows taskbar and wallpaper |
-| `--snapshot <dir>` | Render all 16 themes (landscape and portrait) to PNG files without touching the desktop |
+| `--snapshot <dir>` | Render all 20 themes (landscape and portrait) to PNG files without touching the desktop |
 | `--export-icon <file.ico>` | Export the app icon |
 | `--quit-app`, `--uninstall-app` | Used by the installer to close the app / clean up before uninstalling |
 

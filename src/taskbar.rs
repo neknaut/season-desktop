@@ -12,8 +12,6 @@ use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
 use windows::Win32::System::Registry::*;
 use windows::Win32::UI::WindowsAndMessaging::{SendMessageTimeoutW, HWND_BROADCAST, SMTO_ABORTIFHUNG, WM_SETTINGCHANGE};
 
-use crate::scenes::Kind;
-
 const PERSONALIZE: &str = "Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize";
 const ACCENT: &str = "Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Accent";
 const DWM: &str = "Software\\Microsoft\\Windows\\DWM";
@@ -71,44 +69,6 @@ fn broadcast() {
 pub fn applied() -> bool {
     backup_path().exists()
 }
-
-
-/// Bảng 8 màu từ sáng tới tối quanh màu chủ đề (định dạng AccentPalette của Windows).
-#[allow(dead_code)]
-fn palette(kind: Kind) -> [[u8; 3]; 8] {
-    let (accent, dark) = match kind {
-        Kind::Noel => ([0x2f, 0x9e, 0x7e], [0x0d, 0x3a, 0x34]),
-        Kind::Tet => ([0xd9, 0x3a, 0x2b], [0x7a, 0x0f, 0x15]),
-        Kind::Moon => ([0x6f, 0x6c, 0xd0], [0x1f, 0x22, 0x5c]),
-        k => {
-            let t = k.theme();
-            (t.acc, [t.bar_bg.0, t.bar_bg.1, t.bar_bg.2])
-        }
-    };
-    let mix = |a: [u8; 3], b: [u8; 3], t: f32| -> [u8; 3] {
-        [0, 1, 2].map(|i| (a[i] as f32 + (b[i] as f32 - a[i] as f32) * t).round() as u8)
-    };
-    let white = [255, 255, 255];
-    let black = [0, 0, 0];
-    [
-        mix(accent, white, 0.6),
-        mix(accent, white, 0.4),
-        mix(accent, white, 0.2),
-        accent,
-        mix(accent, dark, 0.6),
-        dark,
-        mix(dark, black, 0.35),
-        mix(accent, white, 0.3),
-    ]
-}
-
-/// Màu hiển thị trong cửa sổ cài đặt.
-#[allow(dead_code)]
-pub fn preview(kind: Kind) -> [[u8; 3]; 3] {
-    let p = palette(kind);
-    [p[3], p[4], p[5]]
-}
-
 
 
 pub fn restore() -> Result<String, String> {

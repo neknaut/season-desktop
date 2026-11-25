@@ -143,12 +143,19 @@ pub fn events(year: i32) -> Vec<(i64, i64, Kind, i64)> {
         add(days(y, 1, 1), 0, Kind::NewYear);
         add(days(y, 2, 14), 0, Kind::Valentine);
         add(days(y, 3, 8), 0, Kind::Women);
+        let jan = days(y, 1, 1);
+        add(jan + crate::lunar::lunar_days_from_january(10, 3, y), 0, Kind::HungKings);
+        add(jan + crate::lunar::lunar_days_from_january(5, 5, y), 0, Kind::DoanNgo);
         add(days(y, 4, 30), 1, Kind::Reunify); // 30/4 – 1/5
         add(days(y, 6, 1), 0, Kind::Children);
+        add(days(y, 7, 27), 0, Kind::Remembrance);
         add(days(y, 9, 2), 0, Kind::National);
         add(days(y, 10, 20), 0, Kind::VnWomen);
         add(days(y, 10, 31), 0, Kind::Halloween);
         add(days(y, 11, 20), 0, Kind::Teachers);
+        if y >= 2026 {
+            add(days(y, 11, 24), 0, Kind::CultureDay);
+        }
         add(days(y, 12, 25), 1, Kind::Noel); // 22/12 – 26/12
     }
     let tets = tet_dates().iter().map(|&(y, m, d, _)| (y, m, d)).chain(TET_EXTRA);

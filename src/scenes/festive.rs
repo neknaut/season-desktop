@@ -174,6 +174,7 @@ fn style(k: Kind) -> Style {
             cols: [0xffd23f, 0xff9f43, 0xffb3c8, 0xfff0b0],
         },
         // Các cảnh có riêng (Giáng sinh, Tết, Trung thu) không dùng khung này
+        Kind::HungKings | Kind::DoanNgo | Kind::Remembrance | Kind::CultureDay => Style { fx: &[], ..style(Kind::Spring) },
         _ => style(Kind::Spring),
     }
 }

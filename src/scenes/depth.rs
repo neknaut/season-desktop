@@ -123,6 +123,8 @@ pub(super) fn near(cv: &mut Canvas, kind: Kind, l: Layout) {
             }
             rocks(cv, right, y + 7.0, 114.0 * factor, post, 0x716377);
         }
+        Kind::HungKings | Kind::Remembrance => rocks(cv, right, y, 166.0 * factor, 0x536051, 0x9b9c76),
+        Kind::DoanNgo | Kind::CultureDay => flower_bed(cv, left, y, 150.0 * factor, 0x697248, [0x9b505f, 0xe4b894]),
         Kind::National | Kind::Reunify => {
             let leaves = if kind == Kind::National { 0x476765 } else { 0x747149 };
             rocks(cv, left - 36.0, y, 120.0 * factor, 0x555260, 0xb0a591);

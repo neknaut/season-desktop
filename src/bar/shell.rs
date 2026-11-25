@@ -484,22 +484,16 @@ fn exe_icon(h: HWND, size: i32) -> Option<HICON> {
 }
 
 /// Icon của cửa sổ, trả về RGBA đã nhân alpha (size x size).
-pub fn window_icon(hwnd: isize, size: i32) -> Option<Vec<u8>> {
+fn window_icon(hwnd: isize, size: i32) -> Option<Vec<u8>> {
     let h = HWND(hwnd as *mut _);
-    if let Some(icon) = exe_icon(h, size) {
-        let out = icon_pixels(icon, size);
-        unsafe {
-            let _ = DestroyIcon(icon);
-        }
-        if out.is_some() {
-            return out;
-        }
-    }
     unsafe {
         let mut hicon: usize = 0;
-        for kind in [ICON_BIG, ICON_SMALL2] {
+        for kind in [ICON_BIG, ICON_SMALL2, ICON_SMALL] {
             let mut res = 0usize;
-            let _ = SendMessageTimeoutW(h, WM_GETICON, WPARAM(kind as usize), LPARAM(0), SMTO_ABORTIFHUNG, 60, Some(&mut res));
+            let delivered = SendMessageTimeoutW(h, WM_GETICON, WPARAM(kind as usize), LPARAM(0), SMTO_ABORTIFHUNG, 40, Some(&mut res));
+            if delivered.0 == 0 {
+                break;
+            }
             if res != 0 {
                 hicon = res;
                 break;
@@ -511,14 +505,22 @@ pub fn window_icon(hwnd: isize, size: i32) -> Option<Vec<u8>> {
         if hicon == 0 {
             hicon = GetClassLongPtrW(h, GCLP_HICONSM);
         }
-        if hicon == 0 {
-            hicon = LoadIconW(None, IDI_APPLICATION).map(|i| i.0 as usize).unwrap_or(0);
+        if hicon != 0 {
+            if let Some(pixels) = icon_pixels(HICON(hicon as *mut _), size) {
+                return Some(pixels);
+            }
         }
-        if hicon == 0 {
-            return None;
-        }
-        icon_pixels(HICON(hicon as *mut _), size)
     }
+    if let Some(icon) = exe_icon(h, size) {
+        let out = icon_pixels(icon, size);
+        unsafe {
+            let _ = DestroyIcon(icon);
+        }
+        if out.is_some() {
+            return out;
+        }
+    }
+    None
 }
 
 fn icon_pixels(icon: HICON, size: i32) -> Option<Vec<u8>> {
@@ -537,7 +539,7 @@ fn icon_pixels(icon: HICON, size: i32) -> Option<Vec<u8>> {
             out[i * 4 + 2] = b[0].min(a);
             out[i * 4 + 3] = a;
         }
-        Some(out)
+        out.chunks_exact(4).any(|p| p[3] != 0).then_some(out)
     }
 }
 
@@ -1858,6 +1860,7 @@ fn pin_from_lnk(lnk: &str, size: i32) -> Pin {
     // Icon riêng ghi trong lối tắt (ví dụ ảnh hồ sơ Chrome), rồi tới icon chương trình, cuối cùng icon của lối tắt
     let icon = lnk_icon_location(lnk)
         .and_then(|(p, i)| icon_at(&p, i, size))
+        .or_else(|| aumid_icon(&aumid, size))
         .or_else(|| if !target.is_empty() && std::path::Path::new(&target).exists() { file_icon(&target, size) } else { None })
         .or_else(|| file_icon(lnk, size));
     Pin { lnk: lnk.to_string(), target: target.to_lowercase(), name, icon, aumid }
@@ -2069,7 +2072,9 @@ pub fn window_icon_for(hwnd: isize, exe: &str, aumid: &str, size: i32) -> Option
             return Some(v);
         }
     }
-    window_icon(hwnd, size).or_else(|| aumid_icon(aumid, size))
+    window_icon(hwnd, size)
+        .or_else(|| aumid_icon(aumid, size))
+        .or_else(|| unsafe { LoadIconW(None, IDI_APPLICATION).ok().and_then(|icon| icon_pixels(icon, size)) })
 }
 
 /// Các mục ghim lưu trong Taskband\Favorites (đúng thứ tự của taskbar gốc, gồm cả app Store).
@@ -2278,6 +2283,17 @@ pub fn pinned_apps(size: i32) -> Vec<Pin> {
 
 fn wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(std::iter::once(0)).collect()
+}
+
+/// Mở danh sách mạng qua Shell để tránh đưa focus bàn phím vào nút bật/tắt Wi-Fi.
+pub fn open_network_flyout() {
+    let result = unsafe {
+        ShellExecuteW(HWND::default(), w!("open"), w!("ms-availablenetworks:"),
+            PCWSTR::null(), PCWSTR::null(), SW_SHOWNORMAL)
+    };
+    if result.0 as isize <= 32 {
+        open("ms-settings:network-status");
+    }
 }
 
 /// Mở một trang Cài đặt của Windows hoặc chương trình (ví dụ "ms-settings:sound", "taskmgr").

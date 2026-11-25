@@ -8,7 +8,7 @@ fn bytes(kind: Kind) -> &'static [u8] {
         Kind::Summer => include_bytes!("../../assets/foregrounds/summer.png"),
         Kind::Autumn => include_bytes!("../../assets/foregrounds/autumn.png"),
         Kind::Winter => include_bytes!("../../assets/foregrounds/winter.png"),
-        Kind::Tet => &[],
+        Kind::Tet | Kind::HungKings | Kind::DoanNgo | Kind::Remembrance | Kind::CultureDay => &[],
         Kind::Moon => include_bytes!("../../assets/foregrounds/moon.png"),
         Kind::Noel => include_bytes!("../../assets/foregrounds/noel.png"),
         Kind::NewYear => include_bytes!("../../assets/foregrounds/newyear.png"),
@@ -32,7 +32,7 @@ fn sprite(kind: Kind) -> Option<Pixmap> {
         Kind::Winter | Kind::Noel => [0.92, 1.00, 1.09],
         Kind::Moon | Kind::NewYear | Kind::Halloween => [0.94, 0.90, 1.09],
         Kind::Valentine | Kind::Women | Kind::VnWomen => [1.06, 0.96, 1.01],
-        Kind::Reunify | Kind::National => [1.05, 1.00, 0.95],
+        Kind::Reunify | Kind::National | Kind::HungKings | Kind::DoanNgo | Kind::Remembrance | Kind::CultureDay => [1.05, 1.00, 0.95],
     };
     for pixel in image.data_mut().chunks_exact_mut(4) {
         let alpha = pixel[3] as f32;
@@ -81,7 +81,7 @@ fn ground_detail(cv: &mut Canvas, kind: Kind, l: Layout, floor: f32) {
 
 pub(super) fn draw(cv: &mut Canvas, kind: Kind, l: Layout) {
     let (wide_x, tall_x, wide_floor, tall_floor, height) = match kind {
-        Kind::Tet => return,
+        Kind::Tet | Kind::HungKings | Kind::DoanNgo | Kind::Remembrance | Kind::CultureDay => return,
         Kind::Spring => (0.56, 0.54, 0.94, 0.92, 0.23),
         Kind::Summer => (0.48, 0.43, 0.81, 0.79, 0.17),
         Kind::Autumn => (0.55, 0.56, 0.85, 0.80, 0.17),
