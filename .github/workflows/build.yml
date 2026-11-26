@@ -1,8 +1,8 @@
-name: Build
+name: CI
 
-# Every pull request and every push to main builds the MSI and uploads it as a workflow artifact.
-# A push to main whose Cargo.toml version has no matching tag yet also publishes a GitHub Release
-# (tag vX.Y.Z) with the MSI attached and the CHANGELOG.md entry as release notes.
+# Every pull request and every push to main runs the tests only (no installer).
+# A push to main whose Cargo.toml version has no v<version> tag yet also builds the MSI and publishes it
+# as a GitHub Release (tag v<version>) with the matching CHANGELOG.md section as release notes.
 
 on:
   pull_request:
@@ -11,7 +11,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: build-${{ github.ref }}
+  group: ci-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
@@ -21,24 +21,51 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  build:
-    name: Build MSI
+  test:
+    name: Test
     runs-on: windows-latest
-    outputs:
-      version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v4
-
-      - name: Read version from Cargo.toml
-        id: version
-        shell: pwsh
-        run: |
-          $version = (Select-String -Path Cargo.toml -Pattern '^version\s*=\s*"([^"]+)"' | Select-Object -First 1).Matches[0].Groups[1].Value
-          "version=$version" >> $env:GITHUB_OUTPUT
-          Write-Host "Version: $version"
-
       - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Run tests
+        run: cargo test --locked
 
+  version:
+    name: Check version
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.check.outputs.version }}
+      release: ${{ steps.check.outputs.release }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Is this a new version?
+        id: check
+        run: |
+          version=$(sed -nE 's/^version\s*=\s*"([^"]+)".*/\1/p' Cargo.toml | head -n 1)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if git ls-remote --exit-code --tags origin "refs/tags/v$version" > /dev/null; then
+            echo "v$version is already released; bump the version in Cargo.toml to publish a release."
+            echo "release=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "New version v$version: building the MSI and publishing a release."
+            echo "release=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  release:
+    name: Build MSI and release
+    needs: [test, version]
+    if: needs.version.outputs.release == 'true'
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
 
       - name: Install WiX Toolset 3.14
@@ -53,43 +80,8 @@ jobs:
         shell: pwsh
         run: ./scripts/build-installer.ps1
 
-      - uses: actions/upload-artifact@v4
-        with:
-          name: SeasonDesktop-${{ steps.version.outputs.version }}-x64
-          path: dist/*.msi
-          if-no-files-found: error
-
-  release:
-    name: Publish release
-    needs: build
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    env:
-      GH_TOKEN: ${{ github.token }}
-      VERSION: ${{ needs.build.outputs.version }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Check whether this version is already released
-        id: check
-        run: |
-          if git ls-remote --exit-code --tags origin "refs/tags/v$VERSION" > /dev/null; then
-            echo "Tag v$VERSION already exists; bump the version in Cargo.toml to publish a release."
-            echo "exists=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "exists=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - uses: actions/download-artifact@v4
-        if: steps.check.outputs.exists == 'false'
-        with:
-          name: SeasonDesktop-${{ env.VERSION }}-x64
-          path: dist
-
-      - name: Create release
-        if: steps.check.outputs.exists == 'false'
+      - name: Publish release
+        shell: bash
         run: |
           # Release notes: the CHANGELOG.md section of this version, without its heading.
           awk -v ver="$VERSION" '
@@ -100,7 +92,7 @@ jobs:
           if [ ! -s notes.md ]; then
             echo "Season Desktop $VERSION" > notes.md
           fi
-          gh release create "v$VERSION" dist/*.msi \
+          gh release create "v$VERSION" "dist/SeasonDesktop-$VERSION-x64.msi" \
             --target "$GITHUB_SHA" \
             --title "Season Desktop $VERSION" \
             --notes-file notes.md
