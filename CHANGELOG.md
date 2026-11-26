@@ -4,6 +4,13 @@ All notable changes to this project are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.2] - 2026-11-26
+
+### Fixed
+
+- Taskbar on the main monitor appearing over a full-screen YouTube video after clicking another monitor:
+  Chrome shrinks an unfocused full-screen window by 1 px, which is now still treated as full screen.
+
 ## [0.1.1] - 2026-11-26
 
 ### Added
