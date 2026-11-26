@@ -1,18 +1,16 @@
-name: CI
+name: Release
 
-# Every pull request and every push to main runs the tests only (no installer).
-# A push to main whose Cargo.toml version has no v<version> tag yet also builds the MSI and publishes it
-# as a GitHub Release (tag v<version>) with the matching CHANGELOG.md section as release notes.
+# Runs only when something is merged (pushed) into main. If the Cargo.toml version has no v<version> tag yet,
+# it builds the MSI, creates the tag and publishes a GitHub Release with the matching CHANGELOG.md section as
+# release notes. Pull requests and other branches run nothing.
 
 on:
-  pull_request:
   push:
     branches: [main]
-  workflow_dispatch:
 
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: release
+  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -21,19 +19,8 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  test:
-    name: Test
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - name: Run tests
-        run: cargo test --locked
-
   version:
     name: Check version
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.check.outputs.version }}
@@ -55,7 +42,7 @@ jobs:
 
   release:
     name: Build MSI and release
-    needs: [test, version]
+    needs: version
     if: needs.version.outputs.release == 'true'
     runs-on: windows-latest
     permissions:

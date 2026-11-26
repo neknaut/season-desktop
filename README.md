@@ -95,13 +95,13 @@ SmartScreen may warn.
 
 ## Continuous integration and releases
 
-GitHub Actions ([`.github/workflows/build.yml`](.github/workflows/build.yml)) runs on Windows runners:
+GitHub Actions ([`.github/workflows/release.yml`](.github/workflows/release.yml)) runs only when something is merged
+into `main`; commits and pull requests run nothing. On each merge it reads `version` from `Cargo.toml`:
 
-- **Every pull request and every push to `main`** runs `cargo test --locked` only. No installer is built.
-- **A push to `main` with a new version** also builds the MSI with `scripts/build-installer.ps1` and publishes
-  it: if no tag `v<version>` exists for the `version` in `Cargo.toml`, the workflow creates that tag and a
-  GitHub Release with only the MSI attached and the matching `CHANGELOG.md` section as release notes. Merges that
-  do not change the version build and publish nothing.
+- **New version** (no tag `v<version>` yet): builds the MSI on a Windows runner with
+  `scripts/build-installer.ps1`, creates the tag `v<version>` and publishes a GitHub Release with only the MSI
+  attached and the matching `CHANGELOG.md` section as release notes.
+- **Same version** (tag already exists): builds and publishes nothing.
 
 To release a new version:
 
@@ -152,7 +152,7 @@ season-desktop/
 ├── shaders/             WGSL shaders
 ├── assets/              Icon, fonts, painted backgrounds, foregrounds, theme previews
 ├── installer/           WiX installer source and license text
-├── .github/workflows/   CI tests and automatic MSI releases
+├── .github/workflows/   Automatic MSI releases on version bumps
 ├── scripts/             Build scripts
 ├── build.rs             Embeds the app icon into the executable
 ├── CHANGELOG.md
