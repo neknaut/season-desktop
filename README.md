@@ -34,7 +34,8 @@ Vietnamese / international holidays.
 
 ## Install
 
-1. Run `SeasonDesktop-<version>-x64.msi`. It installs for the current user into
+1. Download `SeasonDesktop-<version>-x64.msi` from the
+   [latest release](https://github.com/neknaut/season-desktop/releases/latest) and run it. It installs for the current user into
    `%LOCALAPPDATA%\Programs\Season Desktop` (no admin rights) and adds Start menu and desktop shortcuts.
 2. The app opens after installation. Pick a monitor and click a theme, or turn on **Automatic**.
 3. To update, run a newer MSI; it closes the running app and replaces the old version.
@@ -89,9 +90,28 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-installer.ps
 The script compiles the app in release mode and packages it into `dist\SeasonDesktop-<version>-x64.msi`.
 Install that file as described in [Install](#install).
 
-To release a new version, bump `version` in `Cargo.toml`, add an entry to `CHANGELOG.md` and run the script
-again. MSI versions must be numeric (major and minor ≤ 255, patch ≤ 65535). The installer is not code-signed,
-so SmartScreen may warn.
+MSI versions must be numeric (major and minor ≤ 255, patch ≤ 65535). The installer is not code-signed, so
+SmartScreen may warn.
+
+## Continuous integration and releases
+
+GitHub Actions ([`.github/workflows/build.yml`](.github/workflows/build.yml)) runs the same script on a Windows
+runner:
+
+- **Every pull request and every push to `main`** builds the MSI and attaches it to the workflow run as an
+  artifact (**Actions** tab → the run → **Artifacts**). This checks the build and lets you test a change; it does
+  not publish a release.
+- **A push to `main` with a new version** also publishes a release: if no tag `v<version>` exists for the
+  `version` in `Cargo.toml`, the workflow creates that tag and a GitHub Release with the MSI attached and the
+  matching `CHANGELOG.md` section as release notes. Merges that do not change the version publish nothing.
+
+To release a new version:
+
+1. In a pull request, bump `version` in `Cargo.toml` (and run `cargo check` so `Cargo.lock` follows) and add a
+   `## [x.y.z] - YYYY-MM-DD` section to `CHANGELOG.md`.
+2. Merge the pull request into `main`. The release appears under **Releases** a few minutes later.
+
+Never reuse a version: Windows Installer uses it to decide whether an MSI is an upgrade.
 
 ### Command-line options
 
@@ -134,6 +154,7 @@ season-desktop/
 ├── shaders/             WGSL shaders
 ├── assets/              Icon, fonts, painted backgrounds, foregrounds, theme previews
 ├── installer/           WiX installer source and license text
+├── .github/workflows/   CI build and automatic releases
 ├── scripts/             Build scripts
 ├── build.rs             Embeds the app icon into the executable
 ├── CHANGELOG.md
