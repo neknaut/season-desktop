@@ -1,0 +1,101 @@
+name: Release
+
+# Runs only when a merge into main changes Cargo.toml (where the version lives). If that version has no
+# v<version> tag yet, it builds the MSI, creates the tag and publishes a GitHub Release with the matching
+# CHANGELOG.md section as release notes. Other merges, commits and pull requests start nothing.
+# "Run workflow" in the Actions tab retries a release whose build failed.
+
+on:
+  push:
+    branches: [main]
+    paths: [Cargo.toml]
+  workflow_dispatch:
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  version:
+    name: Check version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.check.outputs.version }}
+      release: ${{ steps.check.outputs.release }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Is this a new version?
+        id: check
+        run: |
+          version=$(sed -nE 's/^version\s*=\s*"([^"]+)".*/\1/p' Cargo.toml | head -n 1)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if git ls-remote --exit-code --tags origin "refs/tags/v$version" > /dev/null; then
+            echo "v$version is already released; bump the version in Cargo.toml to publish a release."
+            echo "release=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "New version v$version: building the MSI and publishing a release."
+            echo "release=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  release:
+    name: Build MSI and release
+    needs: version
+    if: needs.version.outputs.release == 'true'
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+
+      # Reuses compiled dependencies from the previous release; only this crate is rebuilt when they match.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: release
+          cache-on-failure: true
+
+      - name: Cache WiX Toolset 3.14
+        id: wix-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/wix314
+          key: wix314-binaries
+
+      - name: Install WiX Toolset 3.14
+        shell: pwsh
+        run: |
+          $dir = Join-Path $env:RUNNER_TEMP "wix314"
+          if ("${{ steps.wix-cache.outputs.cache-hit }}" -eq "true") { $dir >> $env:GITHUB_PATH; exit 0 }
+          Invoke-WebRequest "https://github.com/wixtoolset/wix3/releases/download/wix3141rtm/wix314-binaries.zip" -OutFile "$dir.zip"
+          Expand-Archive "$dir.zip" -DestinationPath $dir
+          $dir >> $env:GITHUB_PATH
+
+      - name: Build installer
+        shell: pwsh
+        run: ./scripts/build-installer.ps1
+
+      - name: Publish release
+        shell: bash
+        run: |
+          # Release notes: the CHANGELOG.md section of this version, without its heading.
+          awk -v ver="$VERSION" '
+            index($0, "## [" ver "]") == 1 { found = 1; next }
+            found && (/^## \[/ || /^\[[^]]+\]: /) { exit }
+            found { print }
+          ' CHANGELOG.md > notes.md
+          if [ ! -s notes.md ]; then
+            echo "Season Desktop $VERSION" > notes.md
+          fi
+          gh release create "v$VERSION" "dist/SeasonDesktop-$VERSION-x64.msi" \
+            --target "$GITHUB_SHA" \
+            --title "Season Desktop $VERSION" \
+            --notes-file notes.md
