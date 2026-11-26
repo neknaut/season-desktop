@@ -131,8 +131,8 @@ delete that folder to remove them.
 Silent install and uninstall:
 
 ```powershell
-msiexec /i SeasonDesktop-0.1.1-x64.msi /qn
-msiexec /x SeasonDesktop-0.1.1-x64.msi /qn
+msiexec /i SeasonDesktop-0.1.2-x64.msi /qn
+msiexec /x SeasonDesktop-0.1.2-x64.msi /qn
 ```
 
 ## Usage

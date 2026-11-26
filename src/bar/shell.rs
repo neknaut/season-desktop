@@ -433,7 +433,10 @@ unsafe fn covers_monitor(h: HWND, mon: RECT, me: u32) -> Option<bool> {
     if !GetMonitorInfoW(MonitorFromRect(&r, MONITOR_DEFAULTTONULL), &mut mi).as_bool() || mi.rcMonitor != mon {
         return None;
     }
-    let covers = r.left <= mon.left && r.top <= mon.top && r.right >= mon.right && r.bottom >= mon.bottom;
+    // Cho lệch vài px: Chrome/YouTube toàn màn hình khi mất focus (bấm sang màn khác) tự thu
+    // cửa sổ ngắn đi 1px (0,0,1920,1079) – vẫn là toàn màn hình.
+    const SLACK: i32 = 4;
+    let covers = r.left <= mon.left + SLACK && r.top <= mon.top + SLACK && r.right >= mon.right - SLACK && r.bottom >= mon.bottom - SLACK;
     if !covers && ex & WS_EX_TOPMOST.0 != 0 {
         // Cửa sổ nổi nhỏ luôn ở trên (ảnh trong ảnh, thông báo…): xem tiếp cửa sổ bên dưới.
         return None;
