@@ -53,6 +53,8 @@ pub struct Status {
     pub mons: Vec<MonInfo>,
     /// Cài đặt chung có thay đổi chưa áp dụng
     pub global_dirty: bool,
+    /// App vừa mở, hình nền/taskbar chưa dựng xong: hiện màn hình loading
+    pub loading: bool,
 }
 
 /// Mỗi hành động chỉ tác động lên đúng màn hình (tên thiết bị) được chọn.
@@ -102,6 +104,8 @@ pub struct SettingsWin {
     preview_rx: Option<std::sync::mpsc::Receiver<(Kind, bool, Vec<u8>, u32, u32)>>,
     /// Icon app (dùng làm logo ở góc trên)
     logo: egui::TextureHandle,
+    /// Đã vẽ ít nhất một khung hình (màn hình loading đã hiện)
+    pub painted: bool,
 }
 
 impl SettingsWin {
@@ -166,7 +170,7 @@ impl SettingsWin {
                 }
             }
         });
-        Ok(Self { window, surface, config, ctx, state, renderer, next_repaint: None, sel: 0, previews: Vec::new(), preview_rx: Some(rx), logo })
+        Ok(Self { window, surface, config, ctx, state, renderer, next_repaint: None, sel: 0, previews: Vec::new(), preview_rx: Some(rx), logo, painted: false })
     }
 
     pub fn on_event(&mut self, gpu: &Gpu, ev: &WindowEvent) {
@@ -213,7 +217,22 @@ impl SettingsWin {
         let previews = &self.previews;
         let logo = &self.logo;
         let previous_selection = *sel;
-        let out = self.ctx.run(raw, |ctx| ui(ctx, cfg, st, &mut actions, sel, previews, logo));
+        // Màn hình loading: chỉ khi app chưa chạy và vừa được mở (đang dựng hình nền, taskbar).
+        // App đang chạy mà mở lại cửa sổ cài đặt thì vào thẳng giao diện.
+        let total = Kind::ALL.len() * 2;
+        let loading = st.loading;
+        let progress = 0.35 + 0.5 * (previews.len() as f32 / total as f32).min(1.0);
+        let out = self.ctx.run(raw, |ctx| {
+            if loading {
+                loading_screen(ctx, logo, progress);
+            } else {
+                ui(ctx, cfg, st, &mut actions, sel, previews, logo);
+            }
+        });
+        if loading {
+            self.ctx.request_repaint_after(Duration::from_millis(16));
+        }
+        self.painted = true;
         if *sel != previous_selection {
             self.window.request_redraw();
         }
@@ -510,6 +529,36 @@ fn cover_image(p: &egui::Painter, rect: egui::Rect, radius: f32, tex: &egui::Tex
         egui::Rect::from_min_max(egui::pos2(0.0, (1.0 - h) / 2.0), egui::pos2(1.0, (1.0 + h) / 2.0))
     };
     p.add(egui::epaint::RectShape::filled(rect, radius, Color32::WHITE).with_texture(tex.id(), uv));
+}
+
+/// Màn hình loading: logo, tên app, vòng xoay và thanh tiến độ ở giữa cửa sổ.
+fn loading_screen(ctx: &egui::Context, logo: &egui::TextureHandle, progress: f32) {
+    egui::CentralPanel::default().frame(egui::Frame::default().fill(BG)).show(ctx, |ui| {
+        let rect = ui.max_rect();
+        let c = rect.center();
+        let p = ui.painter();
+        let size = 72.0;
+        let logo_rect = egui::Rect::from_center_size(c - egui::vec2(0.0, 70.0), egui::vec2(size, size));
+        p.image(logo.id(), logo_rect, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), Color32::WHITE);
+        p.text(c - egui::vec2(0.0, 12.0), egui::Align2::CENTER_CENTER, "Season Desktop", bold(24.0), FG);
+        let note = "Đang dựng hình nền và taskbar…";
+        p.text(c + egui::vec2(0.0, 20.0), egui::Align2::CENTER_CENTER, note, egui::FontId::proportional(13.5), MUTED);
+        // Thanh tiến độ
+        let bar = egui::Rect::from_center_size(c + egui::vec2(0.0, 52.0), egui::vec2(220.0, 4.0));
+        p.rect_filled(bar, 2.0, LINE);
+        let shown = progress.max(0.06);
+        p.rect_filled(egui::Rect::from_min_size(bar.min, egui::vec2(bar.width() * shown, bar.height())), 2.0, BRAND);
+        // Vòng xoay nhỏ cạnh thanh
+        let t = ui.input(|i| i.time) as f32;
+        let center = egui::pos2(bar.right() + 18.0, bar.center().y);
+        let n = 8;
+        for k in 0..n {
+            let a = k as f32 / n as f32 * std::f32::consts::TAU;
+            let fade = ((k as f32 / n as f32) - t * 1.2).rem_euclid(1.0);
+            let pt = center + egui::vec2(a.cos(), a.sin()) * 7.0;
+            p.circle_filled(pt, 1.6, BRAND.gamma_multiply(0.25 + 0.75 * fade));
+        }
+    });
 }
 
 fn theme_label(id: &str) -> &'static str {

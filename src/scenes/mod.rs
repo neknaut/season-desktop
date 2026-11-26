@@ -260,7 +260,7 @@ impl Layout {
     }
 }
 
-/// Ảnh minh hoạ riêng do người dùng đặt vào %APPDATA%\season-desktoprt\<chủ đề>\<tên>.png
+/// Ảnh minh hoạ riêng do người dùng đặt vào %LOCALAPPDATA%\season-desktoprt\<chủ đề>\<tên>.png
 /// (PNG nền trong suốt): các cảnh dùng ảnh này thay cho hình vẽ bằng code nếu có.
 pub fn load_art(theme: &str, name: &str) -> Option<tiny_skia::Pixmap> {
     let path = art_path(theme, name);
