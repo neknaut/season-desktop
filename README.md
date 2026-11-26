@@ -34,7 +34,8 @@ Vietnamese / international holidays.
 
 ## Install
 
-1. Run `SeasonDesktop-<version>-x64.msi`. It installs for the current user into
+1. Download `SeasonDesktop-<version>-x64.msi` from the
+   [latest release](https://github.com/neknaut/season-desktop/releases/latest) and run it. It installs for the current user into
    `%LOCALAPPDATA%\Programs\Season Desktop` (no admin rights) and adds Start menu and desktop shortcuts.
 2. The app opens after installation. Pick a monitor and click a theme, or turn on **Automatic**.
 3. To update, run a newer MSI; it closes the running app and replaces the old version.
@@ -89,9 +90,26 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-installer.ps
 The script compiles the app in release mode and packages it into `dist\SeasonDesktop-<version>-x64.msi`.
 Install that file as described in [Install](#install).
 
-To release a new version, bump `version` in `Cargo.toml`, add an entry to `CHANGELOG.md` and run the script
-again. MSI versions must be numeric (major and minor ≤ 255, patch ≤ 65535). The installer is not code-signed,
-so SmartScreen may warn.
+MSI versions must be numeric (major and minor ≤ 255, patch ≤ 65535). The installer is not code-signed, so
+SmartScreen may warn.
+
+## Continuous integration and releases
+
+GitHub Actions ([`.github/workflows/release.yml`](.github/workflows/release.yml)) runs only when something is merged
+into `main`; commits and pull requests run nothing. On each merge it reads `version` from `Cargo.toml`:
+
+- **New version** (no tag `v<version>` yet): builds the MSI on a Windows runner with
+  `scripts/build-installer.ps1`, creates the tag `v<version>` and publishes a GitHub Release with only the MSI
+  attached and the matching `CHANGELOG.md` section as release notes.
+- **Same version** (tag already exists): builds and publishes nothing.
+
+To release a new version:
+
+1. In a pull request, bump `version` in `Cargo.toml` (and run `cargo check` so `Cargo.lock` follows) and add a
+   `## [x.y.z] - YYYY-MM-DD` section to `CHANGELOG.md`.
+2. Merge the pull request into `main`. The release appears under **Releases** a few minutes later.
+
+Never reuse a version: Windows Installer uses it to decide whether an MSI is an upgrade.
 
 ### Command-line options
 
@@ -134,6 +152,7 @@ season-desktop/
 ├── shaders/             WGSL shaders
 ├── assets/              Icon, fonts, painted backgrounds, foregrounds, theme previews
 ├── installer/           WiX installer source and license text
+├── .github/workflows/   Automatic MSI releases on version bumps
 ├── scripts/             Build scripts
 ├── build.rs             Embeds the app icon into the executable
 ├── CHANGELOG.md
