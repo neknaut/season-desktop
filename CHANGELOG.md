@@ -4,6 +4,35 @@ All notable changes to this project are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.1] - 2026-11-26
+
+### Added
+
+- Four Vietnamese holiday themes: Hung Kings Commemoration, Tết Đoan Ngọ, Remembrance Day (July 27) and
+  Vietnamese Culture Day (November 24); 20 themes in total.
+- Loading screen when the app is opened while it is not running yet.
+- With "Start with Windows" on, the scene of each monitor is also saved as that monitor's Windows wallpaper,
+  so the right theme shows at sign-in before the app starts, even after a hard shutdown.
+
+### Changed
+
+- Monitors are recognised from the Windows display settings (primary or secondary, landscape or portrait),
+  not from `\\.\DISPLAYn` numbers that Windows may swap after a restart. Existing settings are migrated.
+- Settings, logs and saved wallpapers live in `%LOCALAPPDATA%\season-desktop` (per machine) instead of
+  Roaming; the old folder is moved on first start.
+- More transparent glass taskbar islands.
+- The volume icon follows the real volume, mute state and default output device (0%, 1–3 waves, muted),
+  including changes made with keyboard keys or other apps; scrolling on it changes the volume in 2% steps
+  without showing the Windows volume flyout.
+- Settings: the monitor card and the auto on/off button keep a fixed size.
+
+### Fixed
+
+- Taskbar reappearing over a full-screen video when clicking another monitor.
+- Taskbar on a secondary monitor staying hidden after sign-in until the desktop was clicked.
+- Bottom-half Snap not working on portrait monitors while the app was running.
+- Hidden-icons flyout closing before an app's right-click menu could be used.
+
 ## [0.1.0] - 2026-11-25
 
 First public version.

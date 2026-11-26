@@ -1,4 +1,4 @@
-﻿// Bản release không mở cửa sổ console.
+// Bản release không mở cửa sổ console.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod bar;
@@ -35,7 +35,7 @@ use settings::{Action, SettingsWin, Status};
 
 const CHECK_EVERY: Duration = Duration::from_millis(500);
 
-/// Ghi log ra console (bản debug) và %APPDATA%\season-desktop\log.txt.
+/// Ghi log ra console (bản debug) và %LOCALAPPDATA%\season-desktop\log.txt.
 /// Đo thời gian (bật bằng biến môi trường SEASON_PROFILE=1): ghi vào log mỗi 5 giây.
 mod prof {
     use std::sync::Mutex;
@@ -143,6 +143,8 @@ struct Wall {
     backdrop: Option<tiny_skia::Pixmap>,
     /// Màn hình này đang bị che kín nên tạm nghỉ.
     covered: bool,
+    /// Chủ đề đã lưu thành ảnh tĩnh làm hình nền Windows của màn này (để mở máy là thấy ngay).
+    still_kind: Option<Kind>,
 }
 
 struct SettingsHardware {
@@ -196,6 +198,11 @@ struct App {
     restack_until: Option<Instant>,
     cfg_mtime: Option<SystemTime>,
     open_settings_at_start: bool,
+    /// Mở app bằng tay: cửa sổ cài đặt (màn hình loading) hiện trước, hình nền và taskbar
+    /// dựng ngay sau khung hình đầu tiên của nó.
+    pending_start: bool,
+    /// Đang lưu ảnh tĩnh ở luồng nền.
+    still_job: Option<std::thread::JoinHandle<()>>,
     settings_hardware: Option<SettingsHardware>,
     theme_job: Option<ThemeJob>,
     theme_queue: std::collections::VecDeque<(String, String)>,
@@ -229,10 +236,21 @@ fn same_rect(a: &windows::Win32::Foundation::RECT, b: &windows::Win32::Foundatio
     a.left == b.left && a.top == b.top && a.right == b.right && a.bottom == b.bottom
 }
 
+/// Đọc config.toml và chuyển cài đặt màn hình còn ghi theo tên cũ sang khóa theo vai trò.
+fn load_config() -> config::Config {
+    let mut cfg = config::load();
+    let ids: Vec<(String, Vec<String>)> = desktop::monitors().into_iter().map(|m| (m.name, vec![m.hw, m.device])).collect();
+    if cfg.adopt_monitor_ids(&ids) {
+        log("đã chuyển cài đặt màn hình sang khóa theo vai trò (chính/phụ, ngang/dọc)");
+        config::save(&cfg);
+    }
+    cfg
+}
+
 impl App {
     fn new(open_settings_at_start: bool) -> Self {
         let now = Instant::now();
-        let cfg = config::load();
+        let cfg = load_config();
         Self {
             draft: cfg.clone(),
             message: String::new(),
@@ -241,6 +259,8 @@ impl App {
             cfg,
             cfg_mtime: config::modified(),
             open_settings_at_start,
+            pending_start: false,
+            still_job: None,
             settings_hardware: None,
             theme_job: None,
             theme_queue: std::collections::VecDeque::new(),
@@ -309,6 +329,7 @@ impl App {
             autostart: self.autostart,
             on_battery: self.on_battery,
             mons,
+            loading: self.pending_start,
         }
     }
 
@@ -399,8 +420,71 @@ impl App {
             last_tick: now,
             backdrop: None,
             covered: false,
+            still_kind: None,
         });
         self.attach_error = false;
+    }
+
+    /// Dựng hình nền và taskbar của mọi màn hình theo cài đặt đã lưu.
+    fn start_scenes(&mut self, el: &ActiveEventLoop) {
+        if self.cfg.wallpaper_on {
+            self.create_wallpapers(el);
+            self.ensure_scene();
+        }
+        // Bật taskbar trên các màn hình đã chọn; nếu không có màn hình nào mà lần trước
+        // app tắt đột ngột khi đang ẩn taskbar gốc thì trả lại ngay.
+        self.sync_bars(el);
+    }
+
+    /// Khi bật "Khởi động cùng Windows": lưu cảnh đang chạy của từng màn thành ảnh tĩnh và đặt làm
+    /// hình nền Windows của đúng màn đó, để lần mở máy sau Windows hiện đúng chủ đề ngay từ đầu
+    /// (trước khi app kịp chạy), kể cả khi lần này máy bị tắt ngang không kịp thoát app.
+    /// Chỉ làm khi chủ đề của màn đổi; mã hoá PNG và đặt hình nền chạy ở luồng nền.
+    fn persist_stills(&mut self) {
+        if !self.autostart || !self.cfg.wallpaper_on || self.uninstalling {
+            return;
+        }
+        if self.still_job.as_ref().is_some_and(|j| !j.is_finished()) {
+            return;
+        }
+        self.still_job = None;
+        let Some(gpu) = &self.gpu else { return };
+        let mut items: Vec<(windows::Win32::Foundation::RECT, std::path::PathBuf, tiny_skia::Pixmap)> = Vec::new();
+        for wall in self.walls.iter_mut() {
+            let Some(kind) = wall.kind else { continue };
+            if wall.still_kind == Some(kind) || wall.frames == 0 || wall.dl.sprites.is_empty() {
+                continue;
+            }
+            let mut dl = DrawList::default();
+            dl.screen = wall.dl.screen;
+            for c in wall.dl.cmds.iter().filter(|c| c.tex != Tex::Widget) {
+                for s in &wall.dl.sprites[c.start as usize..c.end as usize] {
+                    dl.push(c.blend, c.tex, *s);
+                }
+            }
+            let (w, h) = wall.renderer.size();
+            let px = wall.renderer.render_image(gpu, &dl, wall.fit.0, wall.fit.1);
+            let Some(pm) = tiny_skia::IntSize::from_wh(w, h).and_then(|s| tiny_skia::Pixmap::from_vec(px, s)) else { continue };
+            let path = config::dir().join(format!("hinh-nen-{}-{}.png", format!("{kind:?}").to_lowercase(), wall.monitor.name));
+            items.push((wall.monitor.rect, path, pm));
+            wall.still_kind = Some(kind);
+        }
+        if items.is_empty() {
+            return;
+        }
+        self.still_job = std::thread::Builder::new().name("anh-tinh".into()).spawn(move || {
+            let mut set = Vec::new();
+            for (rect, path, pm) in items {
+                if pm.save_png(&path).is_ok() {
+                    set.push((rect, path.to_string_lossy().to_string()));
+                }
+            }
+            if !set.is_empty() && desktop::set_still_wallpapers(&set) {
+                log(&format!("đã lưu ảnh tĩnh của chủ đề làm hình nền Windows ({} màn) cho lần mở máy sau", set.len()));
+            }
+        }).ok();
+        // Đổi hình nền Windows có thể làm Explorer đưa lớp hình nền gốc lên trên: đẩy xuống lại.
+        self.restack_until = Some(Instant::now() + Duration::from_secs(5));
     }
 
     fn drop_walls(&mut self) {
@@ -940,10 +1024,14 @@ impl App {
 
     /// Việc định kỳ: config sửa tay, nên nghỉ hay chạy, pin, Explorer khởi động lại, đổi ngày/phút.
     fn periodic(&mut self, el: &ActiveEventLoop) {
+        if self.pending_start {
+            // Chưa dựng lần đầu (đang hiện màn hình loading)
+            return;
+        }
         let m = config::modified();
         if m != self.cfg_mtime {
-            self.cfg_mtime = m;
-            let new = config::load();
+            let new = load_config();
+            self.cfg_mtime = config::modified();
             if new != self.cfg {
                 log("đã tải lại config.toml");
                 self.cfg = new.clone();
@@ -993,6 +1081,7 @@ impl App {
         if want.len() != self.bars.len() || want.iter().any(|n| !self.bars.iter().any(|b| &b.monitor == *n)) {
             self.sync_bars(el);
         }
+        self.persist_stills();
     }
 }
 
@@ -1006,16 +1095,17 @@ impl ApplicationHandler for App {
             Ok(t) => self.tray = Some(t),
             Err(e) => log(&format!("không tạo được icon khay: {e}")),
         }
-        if self.cfg.wallpaper_on {
-            self.create_wallpapers(el);
-            self.ensure_scene();
-        }
-        // Bật taskbar trên các màn hình đã chọn; nếu không có màn hình nào mà lần trước
-        // app tắt đột ngột khi đang ẩn taskbar gốc thì trả lại ngay.
-        self.sync_bars(el);
         if self.open_settings_at_start || self.tray.is_none() {
+            // Mở bằng tay: hiện cửa sổ (màn hình loading) trước, dựng hình nền/taskbar sau
+            // khung hình đầu tiên của nó (xem about_to_wait).
             self.open_settings(el);
+            if self.settings.is_some() {
+                self.pending_start = true;
+                return;
+            }
         }
+        // Khởi động cùng Windows: dựng ngay theo cài đặt đã lưu, không chờ gì.
+        self.start_scenes(el);
     }
 
     fn window_event(&mut self, el: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
@@ -1108,6 +1198,16 @@ impl ApplicationHandler for App {
             _ => {}
         }
         self.handle_tray(el);
+        // Màn hình loading đã hiện: giờ mới dựng hình nền và taskbar.
+        if self.pending_start && self.settings.as_ref().map_or(true, |s| s.painted) {
+            let t = Instant::now();
+            self.start_scenes(el);
+            self.pending_start = false;
+            log(&format!("dựng hình nền và taskbar sau màn hình loading trong {} ms", t.elapsed().as_millis()));
+            if let Some(s) = &self.settings {
+                s.window.request_redraw();
+            }
+        }
         let now = Instant::now();
         // Cửa sổ vừa thu nhỏ/phóng to/di chuyển: xét lại ngay màn hình nào bị che
         if bar::shell::windows_changed() {

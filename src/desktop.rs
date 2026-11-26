@@ -43,8 +43,14 @@ unsafe extern "system" fn find_old_workerw(top: HWND, lp: LPARAM) -> BOOL {
 pub struct Monitor {
     pub rect: RECT,
     pub primary: bool,
-    /// Tên thiết bị, ví dụ \\.\DISPLAY1 – dùng để nhớ cài đặt riêng của màn hình.
+    /// Khóa nhớ cài đặt riêng của màn hình, lấy theo cài đặt hiển thị của Windows lúc này:
+    /// màn chính hay phụ, ngang hay dọc, và thứ tự từ trái sang phải trong nhóm đó –
+    /// ví dụ "chinh-ngang-1", "phu-doc-1". Không phụ thuộc số \\.\DISPLAYn (Windows có thể đổi
+    /// số giữa các màn sau khi khởi động lại) hay cổng cắm.
     pub name: String,
+    /// Tên GDI, ví dụ \\.\DISPLAY1, và đường dẫn thiết bị: chỉ để chuyển cấu hình cũ sang khóa mới.
+    pub device: String,
+    pub hw: String,
     /// Tần số quét (Hz)
     pub hz: u32,
 }
@@ -66,12 +72,35 @@ unsafe extern "system" fn monitor_cb(h: windows::Win32::Graphics::Gdi::HMONITOR,
     mi.monitorInfo.cbSize = std::mem::size_of::<MONITORINFOEXW>() as u32;
     if GetMonitorInfoW(h, &mut mi as *mut MONITORINFOEXW as *mut MONITORINFO).as_bool() {
         let n = mi.szDevice.iter().position(|&c| c == 0).unwrap_or(mi.szDevice.len());
-        let name = String::from_utf16_lossy(&mi.szDevice[..n]);
+        let device = String::from_utf16_lossy(&mi.szDevice[..n]);
         let mut dm = DEVMODEW { dmSize: std::mem::size_of::<DEVMODEW>() as u16, ..Default::default() };
         let hz = if EnumDisplaySettingsW(PCWSTR(mi.szDevice.as_ptr()), ENUM_CURRENT_SETTINGS, &mut dm).as_bool() { dm.dmDisplayFrequency } else { 60 };
-        v.push(Monitor { rect: mi.monitorInfo.rcMonitor, primary: mi.monitorInfo.dwFlags & 1 != 0, name, hz: hz.max(30) });
+        let hw = hardware_path(PCWSTR(mi.szDevice.as_ptr())).unwrap_or_default();
+        v.push(Monitor { rect: mi.monitorInfo.rcMonitor, primary: mi.monitorInfo.dwFlags & 1 != 0, name: String::new(), device, hw, hz: hz.max(30) });
     }
     TRUE
+}
+
+/// Đường dẫn thiết bị của màn hình đang gắn vào bộ điều hợp `adapter` (\\.\DISPLAYn).
+/// Bản trước dùng làm khóa cấu hình; giờ chỉ dùng để chuyển cấu hình cũ sang khóa theo vai trò.
+unsafe fn hardware_path(adapter: PCWSTR) -> Option<String> {
+    use windows::Win32::Graphics::Gdi::{EnumDisplayDevicesW, DISPLAY_DEVICEW, DISPLAY_DEVICE_ACTIVE};
+    const EDD_GET_DEVICE_INTERFACE_NAME: u32 = 1;
+    for i in 0..8 {
+        let mut dd = DISPLAY_DEVICEW { cb: std::mem::size_of::<DISPLAY_DEVICEW>() as u32, ..Default::default() };
+        if !EnumDisplayDevicesW(adapter, i, &mut dd, EDD_GET_DEVICE_INTERFACE_NAME).as_bool() {
+            break;
+        }
+        if dd.StateFlags & DISPLAY_DEVICE_ACTIVE == 0 {
+            continue;
+        }
+        let n = dd.DeviceID.iter().position(|&c| c == 0).unwrap_or(dd.DeviceID.len());
+        let id = String::from_utf16_lossy(&dd.DeviceID[..n]).to_lowercase();
+        if !id.is_empty() {
+            return Some(id);
+        }
+    }
+    None
 }
 
 /// Tất cả màn hình, màn hình chính đứng đầu.
@@ -86,6 +115,14 @@ pub fn monitors() -> Vec<Monitor> {
         );
     }
     v.sort_by_key(|m| (!m.primary, m.rect.left, m.rect.top));
+    // Khóa theo vai trò: số màn, màn nào chính, màn nào ngang/dọc đều đọc từ cài đặt của Windows.
+    let mut seen: Vec<String> = Vec::new();
+    for m in v.iter_mut() {
+        let role = format!("{}-{}", if m.primary { "chinh" } else { "phu" }, if m.portrait() { "doc" } else { "ngang" });
+        let n = seen.iter().filter(|r| **r == role).count() + 1;
+        m.name = format!("{role}-{n}");
+        seen.push(role);
+    }
     v
 }
 

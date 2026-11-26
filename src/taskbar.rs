@@ -4,7 +4,7 @@
 //! ("Hiện màu nhấn trên Start và taskbar" + màu nhấn).
 //!
 //! An toàn: trước lần áp dụng đầu tiên, các giá trị gốc được sao lưu vào
-//! %APPDATA%\season-desktop\taskbar-backup.txt; "Khôi phục" ghi lại đúng các giá trị đó
+//! %LOCALAPPDATA%\season-desktop\taskbar-backup.txt; "Khôi phục" ghi lại đúng các giá trị đó
 //! (giá trị nào lúc đầu không có thì xoá đi). Chỉ đụng tới khoá của người dùng hiện tại (HKCU).
 
 use windows::core::{w, PCWSTR};

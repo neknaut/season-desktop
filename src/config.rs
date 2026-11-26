@@ -1,4 +1,4 @@
-//! Cấu hình người dùng: %APPDATA%\season-desktop\config.toml.
+//! Cấu hình người dùng: %LOCALAPPDATA%\season-desktop\config.toml.
 //! Cửa sổ cài đặt ghi vào đây; sửa tay file này app cũng tự áp dụng.
 
 use serde::{Deserialize, Serialize};
@@ -9,7 +9,8 @@ use crate::desktop::LocalTime;
 use crate::scenes::Kind;
 use crate::widget::{days, tet_dates};
 
-/// Cài đặt riêng của một màn hình (nhận diện theo tên thiết bị, ví dụ \.\DISPLAY1).
+/// Cài đặt riêng của một màn hình, nhận diện theo vai trò trong cài đặt hiển thị của Windows
+/// (ví dụ "chinh-ngang-1", "phu-doc-1"; xem `desktop::monitors`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct MonitorCfg {
@@ -99,6 +100,24 @@ impl Config {
             taskbar: self.taskbar_on || (primary && self.monitors.iter().any(|m| m.taskbar)),
             taskbar_theme: self.taskbar_theme.clone(),
         })
+    }
+
+    /// Cấu hình cũ nhớ màn hình theo \\.\DISPLAYn hoặc đường dẫn thiết bị: chuyển sang khóa theo
+    /// vai trò (chinh-ngang-1, phu-doc-1…) của màn hình đang cắm. `monitors` là (khóa mới, các tên cũ
+    /// theo thứ tự ưu tiên). Trả về true nếu có đổi.
+    pub fn adopt_monitor_ids(&mut self, monitors: &[(String, Vec<String>)]) -> bool {
+        let mut changed = false;
+        for (key, old) in monitors {
+            if self.monitors.iter().any(|m| &m.name == key) {
+                continue;
+            }
+            let found = old.iter().filter(|o| !o.is_empty()).find_map(|o| self.monitors.iter().position(|m| &m.name == o));
+            if let Some(i) = found {
+                self.monitors[i].name = key.clone();
+                changed = true;
+            }
+        }
+        changed
     }
 
     pub fn mon_mut(&mut self, name: &str, primary: bool) -> &mut MonitorCfg {
@@ -195,24 +214,55 @@ pub fn next_event(now: &LocalTime) -> Option<(Kind, i64)> {
     events(now.year).into_iter().filter(|e| e.3 >= today).min_by_key(|e| e.3).map(|e| (e.2, e.3 - today))
 }
 
-/// Thư mục AppData\Roaming của NGƯỜI DÙNG (hỏi thẳng Windows, không dựa vào biến môi trường,
+/// Thư mục AppData của NGƯỜI DÙNG (hỏi thẳng Windows, không dựa vào biến môi trường,
 /// vì lúc gỡ cài đặt app được Windows Installer chạy với môi trường khác).
-fn roaming_appdata() -> Option<PathBuf> {
+fn known_folder(id: &windows::core::GUID) -> Option<PathBuf> {
     use windows::Win32::System::Com::CoTaskMemFree;
-    use windows::Win32::UI::Shell::{FOLDERID_RoamingAppData, SHGetKnownFolderPath, KF_FLAG_DEFAULT};
+    use windows::Win32::UI::Shell::{SHGetKnownFolderPath, KF_FLAG_DEFAULT};
     unsafe {
-        let p = SHGetKnownFolderPath(&FOLDERID_RoamingAppData, KF_FLAG_DEFAULT, None).ok()?;
+        let p = SHGetKnownFolderPath(id, KF_FLAG_DEFAULT, None).ok()?;
         let s = p.to_string().ok();
         CoTaskMemFree(Some(p.0 as *const _));
         s.map(PathBuf::from)
     }
 }
 
+/// Thư mục dữ liệu của app: %LOCALAPPDATA%\season-desktop. Dùng AppData\Local (riêng từng máy),
+/// không dùng Roaming: Roaming có thể được đồng bộ sang máy khác, mà cài đặt màn hình, taskbar,
+/// hình nền gốc… chỉ đúng cho máy này. Mỗi máy tự nhận diện màn hình của mình lúc chạy.
 pub fn dir() -> PathBuf {
-    let base = roaming_appdata()
-        .or_else(|| std::env::var_os("APPDATA").map(PathBuf::from))
-        .unwrap_or_else(|| PathBuf::from("."));
-    base.join("season-desktop")
+    use windows::Win32::UI::Shell::{FOLDERID_LocalAppData, FOLDERID_RoamingAppData};
+    static DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    DIR.get_or_init(|| {
+        let local = known_folder(&FOLDERID_LocalAppData)
+            .or_else(|| std::env::var_os("LOCALAPPDATA").map(PathBuf::from))
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join("season-desktop");
+        // Bản cũ lưu ở Roaming: dời sang một lần (giữ nguyên cài đặt, trạng thái taskbar/hình nền gốc).
+        if !local.exists() {
+            if let Some(old) = known_folder(&FOLDERID_RoamingAppData).map(|p| p.join("season-desktop")).filter(|p| p.exists()) {
+                if std::fs::rename(&old, &local).is_err() {
+                    copy_dir(&old, &local);
+                }
+            }
+        }
+        local
+    })
+    .clone()
+}
+
+fn copy_dir(from: &std::path::Path, to: &std::path::Path) {
+    let _ = std::fs::create_dir_all(to);
+    if let Ok(entries) = std::fs::read_dir(from) {
+        for e in entries.flatten() {
+            let target = to.join(e.file_name());
+            if e.path().is_dir() {
+                copy_dir(&e.path(), &target);
+            } else {
+                let _ = std::fs::copy(e.path(), target);
+            }
+        }
+    }
 }
 
 pub fn path() -> PathBuf {

@@ -170,6 +170,9 @@ struct Flyout {
     /// Vẽ ở nhịp sau (không vẽ ngay trong lúc đang xử lý cú bấm)
     pending: bool,
     fade: Option<shell::Fade>,
+    /// Vừa bấm chuột phải vào một icon: chờ xem app có mở menu không
+    /// (lúc bấm, tiến trình của icon, điểm bấm, đã thấy menu chưa).
+    menu_wait: Option<(Instant, u32, (i32, i32), bool, isize)>,
 }
 
 /// Khoảng trống phía trên bảng ^ để đặt trang trí (tuyết...).
@@ -232,6 +235,11 @@ pub struct Bar {
     /// Âm lượng loa mặc định
     audio: Option<shell::Audio>,
     vol: (f32, bool),
+    vol_check: Instant,
+    /// Vừa cuộn chuột trên loa: đọc âm lượng dày hơn tới lúc này
+    vol_fast_until: Instant,
+    /// Phần nấc cuộn chưa đủ một bước (chuột cuộn mịn)
+    wheel_acc: f32,
     audio_check: Instant,
     cal: Calendar,
     /// Lúc cửa sổ nổi vừa bị đóng do bấm ra ngoài (để cú bấm vào chính nút đó không mở lại ngay)
@@ -445,19 +453,20 @@ fn icon(cv: &mut Canvas, which: Icon, x: f32, y: f32, s: f32, col: Color) {
             pb.line_to(8.0, 10.0);
             pb.close();
             paths.extend(pb.finish());
-            if muted || level <= 0.005 {
-                // dấu X: tắt tiếng
+            // Như taskbar Windows 11: tắt tiếng = dấu X; 0% = loa không vạch sóng;
+            // 1–33% một vạch, 34–66% hai vạch, 67–100% ba vạch.
+            let pct = (level * 100.0).round();
+            if muted {
                 for (x0, y0, x1, y1) in [(16.0, 9.5, 21.0, 14.5), (21.0, 9.5, 16.0, 14.5)] {
                     let mut pb = PathBuilder::new();
                     pb.move_to(x0, y0);
                     pb.line_to(x1, y1);
                     paths.extend(pb.finish());
                 }
-            } else {
-                // 1–3 vạch sóng theo mức âm lượng (như taskbar gốc)
-                let waves: &[(f32, f32, f32)] = if level < 0.34 {
+            } else if pct >= 1.0 {
+                let waves: &[(f32, f32, f32)] = if pct <= 33.0 {
                     &[(13.85, 4.0, 0.848)]
-                } else if level < 0.67 {
+                } else if pct <= 66.0 {
                     &[(13.85, 4.0, 0.848), (13.19, 8.0, 0.758)]
                 } else {
                     &[(13.85, 4.0, 0.848), (13.19, 8.0, 0.758), (12.6, 11.5, 0.70)]
@@ -552,6 +561,9 @@ impl Bar {
             aumid_cache: std::collections::HashMap::new(),
             audio: shell::Audio::new(),
             vol: (0.0, false),
+            vol_check: now,
+            vol_fast_until: now,
+            wheel_acc: 0.0,
             audio_check: now,
             preview: preview::Preview::new(phwnd),
             preview_at: None,
@@ -579,7 +591,7 @@ impl Bar {
             tray_pos: Vec::new(),
             chevron_x: 0.0,
             clock_x: 0.0,
-            flyout: Flyout { hwnd: fhwnd, layered: None, open: false, x: 0, y: 0, w: 0, h: 0, cols: 1, hover: None, hits: Vec::new(), close_at: None, pending: false, fade: None },
+            flyout: Flyout { hwnd: fhwnd, layered: None, open: false, x: 0, y: 0, w: 0, h: 0, cols: 1, hover: None, hits: Vec::new(), close_at: None, pending: false, fade: None, menu_wait: None },
             peek_until: None,
             net: shell::network(),
             net_check: now,
@@ -803,14 +815,14 @@ impl Bar {
             self.dirty = true;
         }
         self.apps = apps;
-        // Âm lượng (loa mặc định đổi thì lấy lại)
-        if self.audio.is_none() || self.audio_check.elapsed() > Duration::from_secs(15) {
+        // Âm lượng: loa/tai nghe mặc định đổi thì lấy lại (mức âm lượng đọc trong tick)
+        if self.audio_check.elapsed() > Duration::from_secs(2) || self.audio.is_none() {
             self.audio_check = Instant::now();
-            self.audio = shell::Audio::new();
+            if self.audio.as_ref().map_or(true, |a| a.device_changed()) {
+                self.audio = shell::Audio::new();
+            }
         }
-        if let Some(a) = &self.audio {
-            self.vol = a.get();
-        }
+        self.poll_volume();
         if self.cal.open && self.cal.close_at.is_some_and(|t| Instant::now() >= t) {
             self.close_calendar();
         }
@@ -842,8 +854,12 @@ impl Bar {
             crate::prof_add("    └ mạng", t);
             self.net_check = Instant::now();
             // Windows lỡ bỏ chỗ giữ cho thanh (ví dụ Explorer sắp xếp lại lúc khởi động): giữ lại.
+            // Chỉ ép khi lệch hẳn: taskbar gốc đã ẩn vẫn giữ ~48px, lệch vài px so với thanh này là
+            // bình thường. Ép vùng làm việc bằng SPI_SETWORKAREA làm Windows tắt snap nửa dưới
+            // trên màn hình dọc, nên không ép khi không cần.
             let reserve = (RESERVE * self.k).round() as i32;
-            if !self.hidden && shell::work_bottom(self.mon).is_some_and(|b| (b - (self.mon.bottom - reserve)).abs() > 1) {
+            let off = |b: i32| b - (self.mon.bottom - reserve);
+            if !self.hidden && shell::work_bottom(self.mon).is_some_and(|b| off(b) > reserve / 4 || off(b) < -reserve / 2) {
                 shell::set_work_area(self.mon, reserve);
                 if self.appbar_tries < 3 {
                     self.appbar_tries += 1;
@@ -900,6 +916,7 @@ impl Bar {
     fn set_hidden(&mut self, hide: bool) {
         if hide != self.hidden {
             self.hidden = hide;
+            crate::log(&format!("taskbar {} ({}): {}", if hide { "ẩn" } else { "hiện" }, self.monitor, shell::last_fullscreen_reason()));
             if hide {
                 self.preview.close();
                 self.menu.close();
@@ -1080,8 +1097,25 @@ impl Bar {
         }
     }
 
+    /// Đọc mức âm lượng và tắt tiếng thật của Windows (đổi bằng phím, app khác… cũng thấy ngay).
+    fn poll_volume(&mut self) {
+        let fast = Instant::now() < self.vol_fast_until;
+        if self.vol_check.elapsed() < Duration::from_millis(if fast { 40 } else { 250 }) {
+            return;
+        }
+        self.vol_check = Instant::now();
+        if let Some(a) = &self.audio {
+            let v = a.get();
+            if ((v.0 - self.vol.0).abs() > 0.004) || v.1 != self.vol.1 {
+                self.vol = v;
+                self.dirty = true;
+            }
+        }
+    }
+
     pub fn tick(&mut self) {
         self.poll_flyout();
+        self.poll_volume();
         let now = Instant::now();
         if self.hidden {
             self.next_frame = now + Duration::from_millis(500);
@@ -1109,6 +1143,13 @@ impl Bar {
         self.next_frame = now + Duration::from_millis(if self.anim.any() { 1000 / FPS } else { 250 });
         if self.tiles_animating || self.preview.animating() || self.menu.animating() || self.flyout.fade.is_some() || self.cal.fade.is_some() {
             self.next_frame = now + Duration::from_millis(8);
+        }
+        if Instant::now() < self.vol_fast_until {
+            self.next_frame = self.next_frame.min(now + Duration::from_millis(40));
+        }
+        if self.flyout.menu_wait.is_some() {
+            // đang chờ menu chuột phải của icon trong bảng ^
+            self.next_frame = self.next_frame.min(now + Duration::from_millis(40));
         }
     }
 
@@ -1290,14 +1331,23 @@ impl Bar {
                         winit::event::MouseScrollDelta::PixelDelta(p) => p.y as f32 / 120.0,
                     };
                     if notches != 0.0 {
-                        if self.audio.is_none() {
-                            self.audio = shell::Audio::new();
+                        // Đặt âm lượng trực tiếp, bước 2% mỗi nấc như taskbar gốc (không hiện bảng
+                        // âm lượng của Windows). Chuột cuộn mịn dồn đủ một nấc mới đổi.
+                        self.wheel_acc += notches;
+                        let steps = self.wheel_acc.trunc();
+                        if steps != 0.0 {
+                            self.wheel_acc -= steps;
+                            if self.audio.is_none() {
+                                self.audio = shell::Audio::new();
+                            }
+                            if let Some(a) = &self.audio {
+                                self.vol = a.step(steps * 0.02);
+                                self.dirty = true;
+                            }
                         }
-                        if let Some(a) = &self.audio {
-                            self.vol = a.step(notches * 0.02);
-                            self.dirty = true;
-                            self.next_frame = Instant::now();
-                        }
+                        // đọc lại trạng thái thật dày hơn một lúc
+                        self.vol_fast_until = Instant::now() + Duration::from_millis(1200);
+                        self.next_frame = Instant::now();
                     }
                 }
             }
@@ -1558,6 +1608,7 @@ impl Bar {
                 self.menu_command(id);
             }
         }
+        self.poll_tray_menu();
     }
 
     fn toggle_flyout(&mut self) {
@@ -1707,10 +1758,50 @@ impl Bar {
                     let (col, row) = (i % self.flyout.cols, i / self.flyout.cols);
                     let sx = self.flyout.x + ((10.0 + (col as f32 + 0.5) * FLY_CELL) * k) as i32;
                     let sy = self.flyout.y + ((FLY_TOP + 10.0 + (row as f32 + 0.5) * FLY_CELL) * k) as i32;
-                    self.close_flyout();
-                    if let Some(t) = target {
-                        systray::click(&t, right, sx, sy);
+                    if right {
+                        // Chuột phải: giữ bảng mở; nếu app mở menu thì chờ tới khi chọn xong mục
+                        // trong menu (hoặc bấm ra ngoài), không thì đóng ngay (xem poll_tray_menu).
+                        if let Some(t) = target {
+                            let pid = shell::window_pid(HWND(t.hwnd as *mut _));
+                            self.flyout.menu_wait = Some((Instant::now(), pid, (sx, sy), false, shell::foreground()));
+                            self.flyout.close_at = None;
+                            systray::click(&t, true, sx, sy);
+                        }
+                    } else {
+                        // đóng bảng trước, rồi mới gửi cú bấm: cửa sổ của app không bị bảng che
+                        self.close_flyout();
+                        if let Some(t) = target {
+                            systray::click(&t, false, sx, sy);
+                        }
                     }
+                }
+            }
+        }
+    }
+
+    /// Sau khi chuột phải vào icon trong bảng ^: app mở menu thì giữ bảng tới khi menu đóng;
+    /// app mở cửa sổ (hoặc không làm gì) thì đóng bảng ngay.
+    fn poll_tray_menu(&mut self) {
+        let Some((at, pid, pt, seen, fg)) = self.flyout.menu_wait else { return };
+        if !self.flyout.open {
+            self.flyout.menu_wait = None;
+            return;
+        }
+        match shell::tray_menu_state(pid, pt, fg) {
+            shell::TrayMenu::Menu => {
+                if !seen {
+                    self.flyout.menu_wait = Some((at, pid, pt, true, fg));
+                }
+            }
+            shell::TrayMenu::Window => {
+                self.flyout.menu_wait = None;
+                self.close_flyout();
+            }
+            shell::TrayMenu::Nothing => {
+                // Menu vừa đóng (đã chọn mục hoặc bấm ra ngoài), hoặc chờ mãi không thấy menu
+                if seen || at.elapsed() > Duration::from_millis(700) {
+                    self.flyout.menu_wait = None;
+                    self.close_flyout();
                 }
             }
         }
@@ -1941,17 +2032,18 @@ impl Bar {
                 0.0, zy * band / (bd.height() as f32 * self.k),
                 mx * (1.0 - zx), my + (band_top - my) * zy,
             );
-            cv.fill(&path, Pattern::new(bd.as_ref(), SpreadMode::Pad, FilterQuality::Bilinear, 0.83, transform));
+            // Ảnh hình nền khúc xạ chỉ phủ mờ, để thấy được cả cửa sổ nằm sau thanh.
+            cv.fill(&path, Pattern::new(bd.as_ref(), SpreadMode::Pad, FilterQuality::Bilinear, 0.45, transform));
         } else {
-            cv.fill(&path, solid(ca(19, 23, 35, 0.62)));
+            cv.fill(&path, solid(ca(19, 23, 35, 0.40)));
         }
 
         // Lớp màu chủ đề phủ mỏng để kính trong như Liquid Glass, vẫn đủ tối cho chữ sáng.
         let (r, g, b, a) = lk.bg;
         cv.fill(&path, lin(x, y, x, y + h, &[
-            (0.0, ca(r, g, b, a * 0.42)),
-            (0.48, ca(r / 2, g / 2, b / 2, a * 0.58)),
-            (1.0, ca(r, g, b, a * 0.50)),
+            (0.0, ca(r, g, b, a * 0.30)),
+            (0.48, ca(r / 2, g / 2, b / 2, a * 0.44)),
+            (1.0, ca(r, g, b, a * 0.36)),
         ]));
         let [r, g, b] = lk.reflection;
         cv.fill(&path, rad(x + w * 0.23, y - h * 0.35, x + w * 0.23, y - h * 0.35, w.max(h) * 0.64, &[

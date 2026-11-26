@@ -40,14 +40,14 @@ Vietnamese / international holidays.
 3. To update, run a newer MSI; it closes the running app and replaces the old version.
 
 To uninstall, use **Settings → Apps → Installed apps → Season Desktop → Uninstall**. The app restores the Windows
-taskbar and wallpaper and removes itself from startup. Your settings in `%APPDATA%\season-desktop` are kept;
+taskbar and wallpaper and removes itself from startup. Your settings in `%LOCALAPPDATA%\season-desktop` are kept;
 delete that folder to remove them.
 
 Silent install and uninstall:
 
 ```powershell
-msiexec /i SeasonDesktop-0.1.0-x64.msi /qn
-msiexec /x SeasonDesktop-0.1.0-x64.msi /qn
+msiexec /i SeasonDesktop-0.1.1-x64.msi /qn
+msiexec /x SeasonDesktop-0.1.1-x64.msi /qn
 ```
 
 ## Run from source (testing)
@@ -142,10 +142,10 @@ season-desktop/
 
 ## Configuration and custom art
 
-- Settings: `%APPDATA%\season-desktop\config.toml` (written by the settings window; edits are picked up
+- Settings: `%LOCALAPPDATA%\season-desktop\config.toml` (written by the settings window; edits are picked up
   automatically).
-- Log: `%APPDATA%\season-desktop\log.txt`.
-- Custom art per theme in `%APPDATA%\season-desktop\art\<theme>\` (transparent PNG):
+- Log: `%LOCALAPPDATA%\season-desktop\log.txt`.
+- Custom art per theme in `%LOCALAPPDATA%\season-desktop\art\<theme>\` (transparent PNG):
   `nen.png` (background), `nguoi.png` (people), and for Lunar New Year `lan.png` (lion dance) and
   `giadinh.png` (family scene).
 

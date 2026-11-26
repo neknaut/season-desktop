@@ -3,7 +3,7 @@
 
 use windows::core::{w, PCWSTR};
 use windows::Win32::Foundation::*;
-use windows::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_CLOAKED};
+use windows::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_CLOAKED, DWMWA_EXTENDED_FRAME_BOUNDS};
 use windows::Win32::Graphics::Gdi::*;
 use windows::Win32::UI::Input::KeyboardAndMouse::*;
 use windows::Win32::UI::Shell::*;
@@ -303,39 +303,145 @@ pub fn appbar_remove(hwnd: HWND) {
 }
 
 /// Có app/game toàn màn hình hoặc đang trình chiếu không (khi đó taskbar phải tránh ra).
-pub fn fullscreen_active(primary: RECT) -> bool {
+pub fn fullscreen_active(mon: RECT) -> bool {
+    // Xét cửa sổ nằm trên cùng của CHÍNH màn hình này (theo thứ tự chồng lớp), không xét cửa sổ
+    // đang được chọn: bấm sang màn bên kia thì video toàn màn hình ở đây vẫn che taskbar,
+    // còn YouTube toàn màn hình ở màn bên kia không làm taskbar ở đây biến mất.
     unsafe {
+        let me = std::process::id();
+        let mut h = GetTopWindow(HWND::default()).unwrap_or_default();
+        while !h.is_invalid() {
+            let next = GetWindow(h, GW_HWNDNEXT).unwrap_or_default();
+            if let Some(full) = covers_monitor(h, mon, me) {
+                *LAST_TOP.lock().unwrap_or_else(|e| e.into_inner()) = format!("{} {:#x}", class_name(h), h.0 as usize);
+                return full;
+            }
+            h = next;
+        }
+        LAST_TOP.lock().unwrap_or_else(|e| e.into_inner()).clear();
+        false
+    }
+}
+
+/// Tiến trình sở hữu cửa sổ `h`.
+pub fn window_pid(h: HWND) -> u32 {
+    let mut pid = 0u32;
+    unsafe {
+        GetWindowThreadProcessId(h, Some(&mut pid));
+    }
+    pid
+}
+
+/// Sau khi chuột phải vào icon khay: app đang mở menu, đã mở cửa sổ, hay chưa có gì.
+pub enum TrayMenu {
+    Menu,
+    Window,
+    Nothing,
+}
+
+/// Xét phản hồi của app (tiến trình `pid`) sau cú chuột phải tại điểm `pt` (pixel màn hình).
+/// Menu: menu chuẩn của Windows (#32768) đang hiện, hoặc cửa sổ popup không thanh tiêu đề của app
+/// nằm gần chỗ bấm (menu tự vẽ của Qt, Electron…). Window: cửa sổ đang được chọn là cửa sổ có
+/// thanh tiêu đề của app.
+pub fn tray_menu_state(pid: u32, pt: (i32, i32), fg_before: isize) -> TrayMenu {
+    unsafe {
+        let mut h = GetTopWindow(HWND::default()).unwrap_or_default();
+        let mut n = 0;
+        while !h.is_invalid() && n < 400 {
+            n += 1;
+            let next = GetWindow(h, GW_HWNDNEXT).unwrap_or_default();
+            if IsWindowVisible(h).as_bool() {
+                if class_name(h) == "#32768" {
+                    return TrayMenu::Menu;
+                }
+                if pid != 0 && window_pid(h) == pid {
+                    let style = GetWindowLongW(h, GWL_STYLE) as u32;
+                    let mut r = RECT::default();
+                    let popup = style & WS_POPUP.0 != 0 && style & WS_CAPTION.0 != WS_CAPTION.0;
+                    if popup && GetWindowRect(h, &mut r).is_ok() {
+                        let (w, hh) = (r.right - r.left, r.bottom - r.top);
+                        let near = pt.0 >= r.left - 80 && pt.0 <= r.right + 80 && pt.1 >= r.top - 80 && pt.1 <= r.bottom + 80;
+                        if w > 20 && hh > 20 && w < 900 && hh < 1200 && near {
+                            return TrayMenu::Menu;
+                        }
+                    }
+                }
+            }
+            h = next;
+        }
         let fg = GetForegroundWindow();
-        if fg.is_invalid() {
-            return false;
-        }
-        // Chỉ xét app nằm trên chính màn hình này: YouTube toàn màn hình ở màn bên kia
-        // không được làm taskbar ở đây biến mất.
-        let hm = MonitorFromWindow(fg, MONITOR_DEFAULTTONEAREST);
-        let mut mi = MONITORINFO { cbSize: std::mem::size_of::<MONITORINFO>() as u32, ..Default::default() };
-        if !GetMonitorInfoW(hm, &mut mi).as_bool() || mi.rcMonitor != primary {
-            return false;
-        }
-        let class = class_name(fg);
-        if matches!(class.as_str(), "Progman" | "WorkerW" | "Shell_TrayWnd" | "Shell_SecondaryTrayWnd") {
-            return false;
-        }
-        // Windows báo đang có app toàn màn hình (video, game, trình chiếu) – app đó nằm trên màn này
-        if let Ok(s) = SHQueryUserNotificationState() {
-            if s == QUNS_BUSY || s == QUNS_RUNNING_D3D_FULL_SCREEN || s == QUNS_PRESENTATION_MODE {
-                return true;
+        // Chỉ tính cửa sổ vừa được đưa lên sau cú bấm (không phải cửa sổ app đang chọn từ trước)
+        if pid != 0 && !fg.is_invalid() && fg.0 as isize != fg_before && window_pid(fg) == pid {
+            let style = GetWindowLongW(fg, GWL_STYLE) as u32;
+            if style & WS_CAPTION.0 == WS_CAPTION.0 {
+                return TrayMenu::Window;
             }
         }
-        // Cửa sổ phủ kín cả màn hình. Cửa sổ phóng to bình thường còn thanh tiêu đề thì không tính
-        // (Chrome/YouTube toàn màn hình vẫn bị Windows coi là "phóng to" nhưng đã bỏ thanh tiêu đề).
-        let mut r = RECT::default();
-        if GetWindowRect(fg, &mut r).is_err() {
-            return false;
-        }
-        let covers = r.left <= primary.left && r.top <= primary.top && r.right >= primary.right && r.bottom >= primary.bottom;
-        let caption = (GetWindowLongW(fg, GWL_STYLE) as u32 & WS_CAPTION.0) == WS_CAPTION.0;
-        covers && !(IsZoomed(fg).as_bool() && caption)
+        TrayMenu::Nothing
     }
+}
+
+static LAST_TOP: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
+
+/// Cửa sổ quyết định lần xét toàn màn hình gần nhất (lớp và handle), để ghi log.
+pub fn last_fullscreen_reason() -> String {
+    LAST_TOP.lock().map(|s| s.clone()).unwrap_or_default()
+}
+
+/// Cửa sổ `h` có đáng xét trên màn hình `mon` không: None = bỏ qua (ẩn, thu nhỏ, của app này,
+/// cửa sổ công cụ, nằm ở màn khác, cửa sổ nổi nhỏ…); Some(true) = phủ kín màn hình kiểu
+/// toàn màn hình; Some(false) = cửa sổ thường đang nằm trên cùng, hoặc đã tới desktop.
+unsafe fn covers_monitor(h: HWND, mon: RECT, me: u32) -> Option<bool> {
+    if !IsWindowVisible(h).as_bool() || IsIconic(h).as_bool() {
+        return None;
+    }
+    let class = class_name(h);
+    if matches!(class.as_str(), "Progman" | "WorkerW") {
+        return Some(false);
+    }
+    if matches!(class.as_str(), "Shell_TrayWnd" | "Shell_SecondaryTrayWnd") {
+        return None;
+    }
+    let mut pid = 0u32;
+    GetWindowThreadProcessId(h, Some(&mut pid));
+    if pid == me {
+        return None;
+    }
+    let ex = GetWindowLongW(h, GWL_EXSTYLE) as u32;
+    // Lớp phủ không nhận chuột/không nhận focus (overlay của driver, game launcher…)
+    if ex & (WS_EX_TOOLWINDOW.0 | WS_EX_TRANSPARENT.0 | WS_EX_NOACTIVATE.0) != 0 {
+        return None;
+    }
+    let mut cloaked = 0u32;
+    let _ = DwmGetWindowAttribute(h, DWMWA_CLOAKED, &mut cloaked as *mut u32 as *mut _, 4);
+    if cloaked != 0 {
+        return None;
+    }
+    // Khung nhìn thấy của cửa sổ (không tính viền kéo giãn vô hình ~7px: cửa sổ phóng to ở màn
+    // bên cạnh lấn sang màn này đúng phần viền đó).
+    let mut r = RECT::default();
+    if DwmGetWindowAttribute(h, DWMWA_EXTENDED_FRAME_BOUNDS, &mut r as *mut RECT as *mut _, std::mem::size_of::<RECT>() as u32).is_err() {
+        if GetWindowRect(h, &mut r).is_err() {
+            return None;
+        }
+    }
+    if r.right <= r.left || r.bottom <= r.top {
+        return None;
+    }
+    // Chỉ xét cửa sổ thuộc về màn hình này (màn chứa phần lớn cửa sổ)
+    let mut mi = MONITORINFO { cbSize: std::mem::size_of::<MONITORINFO>() as u32, ..Default::default() };
+    if !GetMonitorInfoW(MonitorFromRect(&r, MONITOR_DEFAULTTONULL), &mut mi).as_bool() || mi.rcMonitor != mon {
+        return None;
+    }
+    let covers = r.left <= mon.left && r.top <= mon.top && r.right >= mon.right && r.bottom >= mon.bottom;
+    if !covers && ex & WS_EX_TOPMOST.0 != 0 {
+        // Cửa sổ nổi nhỏ luôn ở trên (ảnh trong ảnh, thông báo…): xem tiếp cửa sổ bên dưới.
+        return None;
+    }
+    // Cửa sổ phóng to bình thường còn thanh tiêu đề thì không tính
+    // (Chrome/YouTube toàn màn hình vẫn bị Windows coi là "phóng to" nhưng đã bỏ thanh tiêu đề).
+    let caption = (GetWindowLongW(h, GWL_STYLE) as u32 & WS_CAPTION.0) == WS_CAPTION.0;
+    Some(covers && !(IsZoomed(h).as_bool() && caption))
 }
 
 fn class_name(h: HWND) -> String {
@@ -2321,6 +2427,9 @@ pub fn launch(lnk: &str) {
 /// Âm lượng loa mặc định (Core Audio), giống nút loa của taskbar gốc.
 pub struct Audio {
     ep: windows::Win32::Media::Audio::Endpoints::IAudioEndpointVolume,
+    en: windows::Win32::Media::Audio::IMMDeviceEnumerator,
+    /// Mã thiết bị phát mặc định lúc lấy `ep` (đổi loa/tai nghe thì phải lấy lại)
+    id: String,
 }
 
 impl Audio {
@@ -2331,21 +2440,28 @@ impl Audio {
             let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
             let en: IMMDeviceEnumerator = CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL).ok()?;
             let dev = en.GetDefaultAudioEndpoint(eRender, eConsole).ok()?;
+            let id = Self::device_id(&dev);
             let ep = dev.Activate(CLSCTX_ALL, None).ok()?;
-            Some(Self { ep })
+            Some(Self { ep, en, id })
         }
     }
 
-    /// (mức 0..1, đang tắt tiếng)
-    pub fn get(&self) -> (f32, bool) {
-        unsafe { (self.ep.GetMasterVolumeLevelScalar().unwrap_or(0.0), self.ep.GetMute().map(|b| b.as_bool()).unwrap_or(false)) }
+    unsafe fn device_id(dev: &windows::Win32::Media::Audio::IMMDevice) -> String {
+        match dev.GetId() {
+            Ok(p) => {
+                let s = p.to_string().unwrap_or_default();
+                windows::Win32::System::Com::CoTaskMemFree(Some(p.0 as *const _));
+                s
+            }
+            Err(_) => String::new(),
+        }
     }
 
-    /// Tăng/giảm âm lượng (như cuộn chuột trên nút loa của taskbar gốc).
+    /// Tăng/giảm âm lượng trực tiếp (bước 2% như cuộn chuột trên loa của taskbar gốc), không hiện
+    /// bảng âm lượng của Windows. Tăng khi đang tắt tiếng thì bật tiếng lại.
     pub fn step(&self, d: f32) -> (f32, bool) {
         let (v, muted) = self.get();
-        let nv = ((v + d) * 50.0).round() / 50.0;
-        let nv = nv.clamp(0.0, 1.0);
+        let nv = (((v + d) * 50.0).round() / 50.0).clamp(0.0, 1.0);
         unsafe {
             let _ = self.ep.SetMasterVolumeLevelScalar(nv, std::ptr::null());
             if muted && d > 0.0 {
@@ -2353,5 +2469,21 @@ impl Audio {
             }
         }
         self.get()
+    }
+
+    /// Thiết bị phát mặc định đã đổi (cắm tai nghe, chọn loa khác…)?
+    pub fn device_changed(&self) -> bool {
+        use windows::Win32::Media::Audio::*;
+        unsafe {
+            match self.en.GetDefaultAudioEndpoint(eRender, eConsole) {
+                Ok(dev) => Self::device_id(&dev) != self.id,
+                Err(_) => !self.id.is_empty(),
+            }
+        }
+    }
+
+    /// (mức 0..1, đang tắt tiếng)
+    pub fn get(&self) -> (f32, bool) {
+        unsafe { (self.ep.GetMasterVolumeLevelScalar().unwrap_or(0.0), self.ep.GetMute().map(|b| b.as_bool()).unwrap_or(false)) }
     }
 }
